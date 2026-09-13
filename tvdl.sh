@@ -1,8 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/bash
 ###############################################################################
 # TVDL - Termux Video Downloader
-# YouTube + Facebook downloader for Termux (Android), no root, no server.
+# YouTube + Facebook + Instagram + X (Twitter) downloader for Termux (Android), no root, no server.
 # Engine: yt-dlp + ffmpeg
+#
+# Author:  Khahdihdz
+# Website: https://khahdihdz.github.io
 ###############################################################################
 
 set -Eeuo pipefail
@@ -12,7 +15,9 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.0.0"
+APP_VERSION="1.1.0"
+APP_AUTHOR="Khahdihdz"
+APP_URL="https://khahdihdz.github.io"
 
 CONFIG_DIR="$HOME/.config/termux-video-downloader"
 CONFIG_FILE="$CONFIG_DIR/config.conf"
@@ -103,9 +108,25 @@ handle_error() {
     log_error_to_file "$msg" "$detail"
     echo ""
     echo "Gợi ý:"
-    echo "  - Kiểm tra URL"
-    echo "  - Kiểm tra kết nối Internet"
-    echo "  - Cập nhật yt-dlp (menu 8)"
+    if echo "$detail" | grep -qiE "not available to everyone|isn't available to everyone|certain audiences|rate-limit|login required|restricted video|private"; then
+        echo "  - Bài/video này yêu cầu ĐĂNG NHẬP mới xem được"
+        echo "    (bị giới hạn độ tuổi / khu vực / nội dung nhạy cảm)."
+        echo "  - Vào menu 10 (Cookies đăng nhập) để nạp cookie trình duyệt"
+        echo "    rồi thử tải lại."
+    elif echo "$detail" | grep -qiE "no video could be found"; then
+        echo "  - X (Twitter) không hỗ trợ tải ẢNH qua yt-dlp (chỉ video/GIF),"
+        echo "    kể cả với bản yt-dlp mới nhất — đây là giới hạn của yt-dlp,"
+        echo "    không phải do thiếu cập nhật."
+        echo "  - Nếu bài đăng chỉ có ảnh: lưu ảnh thủ công bằng trình duyệt"
+        echo "    (nhấn giữ ảnh > Lưu ảnh)."
+        echo "  - Nếu bạn chắc bài đăng có video, có thể tài khoản đó riêng tư"
+        echo "    → thử menu 10 (Cookies) rồi tải lại."
+    else
+        echo "  - Kiểm tra URL"
+        echo "  - Kiểm tra kết nối Internet"
+        echo "  - Cập nhật yt-dlp (menu 8)"
+        echo "  - Nếu là nội dung riêng tư/giới hạn tuổi, thử menu 10 (Cookies)"
+    fi
     pause_screen
 }
 
@@ -266,10 +287,11 @@ check_storage() {
 
 show_banner() {
     clear
-    echo -e "${C_CYAN}╔══════════════════════════════════════╗${C_RESET}"
-    echo -e "${C_CYAN}║${C_RESET}${C_BOLD}        TERMUX VIDEO DOWNLOADER       ${C_RESET}${C_CYAN}║${C_RESET}"
-    echo -e "${C_CYAN}║${C_RESET}          Facebook + YouTube          ${C_CYAN}║${C_RESET}"
-    echo -e "${C_CYAN}╚══════════════════════════════════════╝${C_RESET}"
+    echo -e "${C_CYAN}╔══════════════════════════════════════════╗${C_RESET}"
+    echo -e "${C_CYAN}║${C_RESET}${C_BOLD}         TERMUX VIDEO DOWNLOADER          ${C_RESET}${C_CYAN}║${C_RESET}"
+    echo -e "${C_CYAN}║${C_RESET}    YouTube + Facebook + Instagram + X    ${C_CYAN}║${C_RESET}"
+    echo -e "${C_CYAN}╚══════════════════════════════════════════╝${C_RESET}"
+    echo -e "        ${APP_NAME} v${APP_VERSION} · by ${APP_AUTHOR} · ${C_CYAN}${APP_URL}${C_RESET}"
 }
 
 show_menu() {
@@ -284,6 +306,7 @@ show_menu() {
     echo -e "  ${C_GREEN}7.${C_RESET} Thư mục tải"
     echo -e "  ${C_GREEN}8.${C_RESET} Cập nhật yt-dlp"
     echo -e "  ${C_GREEN}9.${C_RESET} Kiểm tra hệ thống"
+    echo -e "  ${C_GREEN}10.${C_RESET} Cookies đăng nhập (Instagram/Facebook riêng tư)"
     echo -e "  ${C_RED}0.${C_RESET} Thoát"
     echo ""
     echo -e "Thư mục tải hiện tại: ${C_YELLOW}$DOWNLOAD_DIR${C_RESET}"
@@ -307,6 +330,10 @@ detect_platform() {
         echo "YouTube"
     elif [[ "$url" =~ facebook\.com|fb\.watch ]]; then
         echo "Facebook"
+    elif [[ "$url" =~ instagram\.com ]]; then
+        echo "Instagram"
+    elif [[ "$url" =~ (twitter\.com|x\.com)/ ]]; then
+        echo "X (Twitter)"
     else
         echo "Không xác định"
     fi
@@ -371,6 +398,80 @@ cookie_args() {
     else
         echo ""
     fi
+}
+
+# ---------------------------------------------------------------------------
+# 9b. COOKIE MANAGEMENT (needed for Instagram/Facebook age-restricted,
+#     private, or "not available to everyone" content)
+# ---------------------------------------------------------------------------
+
+show_cookie_menu() {
+    while true; do
+        show_banner
+        echo ""
+        echo -e "  Cookie hiện tại: $([[ -f "$COOKIES_FILE" ]] && echo -e "${C_GREEN}Đã nạp${C_RESET} ($COOKIES_FILE)" || echo -e "${C_YELLOW}Chưa có${C_RESET}")"
+        echo ""
+        echo "  1. Nạp cookie từ file (đường dẫn .txt định dạng Netscape)"
+        echo "  2. Dán nội dung cookie trực tiếp"
+        echo "  3. Xóa cookie đã lưu"
+        echo "  4. Hướng dẫn lấy cookie Instagram/Facebook"
+        echo "  0. Quay lại"
+        read -rp "Chọn: " cchoice
+        case "$cchoice" in
+            1)
+                read -rp "Nhập đường dẫn file cookies.txt: " cpath
+                cpath="${cpath/#\~/$HOME}"
+                if [[ -z "$cpath" || ! -f "$cpath" ]]; then
+                    log_fail "Không tìm thấy file: $cpath"
+                else
+                    mkdir -p "$STATE_DIR"
+                    cp "$cpath" "$COOKIES_FILE"
+                    chmod 600 "$COOKIES_FILE"
+                    log_ok "Đã nạp cookie vào $COOKIES_FILE"
+                fi
+                pause_screen
+                ;;
+            2)
+                echo "Dán nội dung cookies.txt (định dạng Netscape)."
+                echo "Nhập xong, gõ một dòng chỉ chứa: END rồi Enter."
+                mkdir -p "$STATE_DIR"
+                : > "$COOKIES_FILE"
+                while IFS= read -r line; do
+                    [[ "$line" == "END" ]] && break
+                    echo "$line" >> "$COOKIES_FILE"
+                done
+                chmod 600 "$COOKIES_FILE"
+                log_ok "Đã lưu cookie vào $COOKIES_FILE"
+                pause_screen
+                ;;
+            3)
+                if [[ -f "$COOKIES_FILE" ]]; then
+                    rm -f "$COOKIES_FILE"
+                    log_ok "Đã xóa cookie."
+                else
+                    log_info "Chưa có cookie nào để xóa."
+                fi
+                pause_screen
+                ;;
+            4)
+                echo ""
+                echo "Cách lấy cookie Instagram/Facebook (định dạng Netscape):"
+                echo "  1. Trên điện thoại, cài extension \"Get cookies.txt LOCALLY\""
+                echo "     (Kiwi Browser / Firefox đều dùng được tiện ích Chrome)."
+                echo "  2. Đăng nhập Instagram/Facebook trên trình duyệt đó."
+                echo "  3. Mở bài viết/video cần tải, bấm extension, chọn Export."
+                echo "  4. Chuyển file cookies.txt vào bộ nhớ máy, ví dụ:"
+                echo "     /storage/emulated/0/Download/cookies.txt"
+                echo "  5. Quay lại đây, chọn mục 1, nhập đường dẫn file đó."
+                echo ""
+                echo "Lưu ý: không chia sẻ file cookie này cho ai, nó chứa"
+                echo "phiên đăng nhập tài khoản của bạn."
+                pause_screen
+                ;;
+            0) return ;;
+            *) ;;
+        esac
+    done
 }
 
 # ---------------------------------------------------------------------------
@@ -460,7 +561,7 @@ quality_to_format_string() {
 download_video() {
     show_banner
     echo ""
-    echo "Nhập URL Facebook hoặc YouTube:"
+    echo "Nhập URL Facebook, YouTube, Instagram hoặc X (Twitter):"
     read -rp "> " url
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
 
@@ -477,10 +578,10 @@ download_video() {
     echo "Nền tảng: $platform"
 
     if [[ "$platform" == "Không xác định" ]]; then
-        log_warn "URL không thuộc YouTube hoặc Facebook. yt-dlp sẽ vẫn thử tải."
+        log_warn "URL không thuộc YouTube, Facebook, Instagram hoặc X. yt-dlp sẽ vẫn thử tải."
     fi
 
-    get_video_info "$url" || return
+    get_video_info "$url" || return 0
 
     echo ""
     show_formats
@@ -510,43 +611,59 @@ download_video() {
     fi
 
     mkdir -p "$DOWNLOAD_DIR"
-    local outtmpl="$DOWNLOAD_DIR/%(title)s.%(ext)s"
+    # %(playlist_index&...)s only adds a suffix when the URL is an album/carousel
+    # (multiple photos/videos in one post) so items don't overwrite each other;
+    # a normal single video/photo keeps a plain filename.
+    local outtmpl="$DOWNLOAD_DIR/%(title)s%(playlist_index&_{}|)s.%(ext)s"
 
     echo ""
     echo "Downloading..."
     local log_file="$TMP_DIR/tvdl_dl.log"
+    local start_marker="$TMP_DIR/.dl_marker_$$"
+    touch "$start_marker"
     set +e
-    eval "$ytdlp $(cookie_args) -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    eval "$ytdlp $(cookie_args) -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
     if [[ $rc -ne 0 ]]; then
         # Try nearest quality if requested one not found
-        if grep -qi "requested format not available" "$log_file"; then
+        # (yt-dlp's actual message is "Requested format is not available.")
+        if grep -qiE "requested format( is)? not available" "$log_file"; then
             log_warn "Không tìm thấy chất lượng đã chọn."
-            if ask_yes_no "Chọn chất lượng gần nhất?"; then
-                set +e
-                eval "$ytdlp $(cookie_args) -f \"bv*+ba/b\" --merge-output-format mp4 -c --no-warnings --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
-                rc=${PIPESTATUS[0]}
-                set -e
+            if ask_yes_no "Thử tự động chọn chất lượng gần nhất có sẵn?"; then
+                local fallback_fmt
+                for fallback_fmt in "bv*+ba/b" "b"; do
+                    [[ "$fallback_fmt" == "$fmt" ]] && continue
+                    set +e
+                    eval "$ytdlp $(cookie_args) -f \"$fallback_fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+                    rc=${PIPESTATUS[0]}
+                    set -e
+                    [[ $rc -eq 0 ]] && break
+                done
             fi
         fi
     fi
 
-    if [[ $rc -eq 0 ]]; then
-        log_ok "Tải thành công"
-        local last_file
-        last_file=$(ls -t "$DOWNLOAD_DIR" 2>/dev/null | head -n 1)
-        local size="Không rõ"
-        if [[ -n "$last_file" && -f "$DOWNLOAD_DIR/$last_file" ]]; then
-            size=$(du -h "$DOWNLOAD_DIR/$last_file" | cut -f1)
-        fi
+    # Collect every file this run produced (an album/carousel yields more than one)
+    local new_files=()
+    while IFS= read -r -d '' f; do
+        new_files+=("$f")
+    done < <(find "$DOWNLOAD_DIR" -maxdepth 1 -type f -newer "$start_marker" -print0 2>/dev/null)
+    rm -f "$start_marker"
+
+    if [[ $rc -eq 0 && ${#new_files[@]} -gt 0 ]]; then
+        log_ok "Tải thành công (${#new_files[@]} file)"
         echo ""
         echo "File:"
-        echo "  ${DOWNLOAD_DIR#/storage/emulated/0/}/$last_file"
-        echo ""
-        echo "Dung lượng: $size"
-        log_history "$platform" "$url" "$last_file" "$size" "OK"
+        local f size last_name="-" last_size="Không rõ"
+        for f in "${new_files[@]}"; do
+            size=$(du -h "$f" 2>/dev/null | cut -f1)
+            echo "  ${f#"$DOWNLOAD_DIR"/}  ($size)"
+            last_name="$(basename "$f")"
+            last_size="$size"
+        done
+        log_history "$platform" "$url" "$last_name" "$last_size" "OK"
     else
         handle_error "Không thể tải video." "$(tail -n 15 "$log_file" 2>/dev/null)"
         log_history "$platform" "$url" "-" "-" "FAILED"
@@ -611,7 +728,7 @@ download_playlist() {
     local log_file="$TMP_DIR/tvdl_playlist.log"
 
     set +e
-    eval "$ytdlp $(cookie_args) $range_args -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    eval "$ytdlp $(cookie_args) $range_args -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
@@ -676,19 +793,30 @@ download_audio_with_url() {
     fi
 
     mkdir -p "$DOWNLOAD_DIR"
-    local outtmpl="$DOWNLOAD_DIR/%(title)s.%(ext)s"
+    local outtmpl="$DOWNLOAD_DIR/%(title)s%(playlist_index&_{}|)s.%(ext)s"
     local log_file="$TMP_DIR/tvdl_audio.log"
+    local start_marker="$TMP_DIR/.dl_marker_$$"
+    touch "$start_marker"
 
     set +e
-    eval "$ytdlp $(cookie_args) -x --audio-format $afmt -c --no-warnings --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    eval "$ytdlp $(cookie_args) -x --audio-format $afmt -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
-    if [[ $rc -eq 0 ]]; then
-        log_ok "Tải audio thành công"
-        local last_file
-        last_file=$(ls -t "$DOWNLOAD_DIR" 2>/dev/null | head -n 1)
-        log_history "$platform" "$url" "$last_file" "-" "OK"
+    local new_files=()
+    while IFS= read -r -d '' f; do
+        new_files+=("$f")
+    done < <(find "$DOWNLOAD_DIR" -maxdepth 1 -type f -newer "$start_marker" -print0 2>/dev/null)
+    rm -f "$start_marker"
+
+    if [[ $rc -eq 0 && ${#new_files[@]} -gt 0 ]]; then
+        log_ok "Tải audio thành công (${#new_files[@]} file)"
+        local f last_name="-"
+        for f in "${new_files[@]}"; do
+            echo "  ${f#"$DOWNLOAD_DIR"/}"
+            last_name="$(basename "$f")"
+        done
+        log_history "$platform" "$url" "$last_name" "-" "OK"
     else
         handle_error "Không thể tải audio." "$(tail -n 15 "$log_file" 2>/dev/null)"
         log_history "$platform" "$url" "-" "-" "FAILED"
@@ -919,15 +1047,16 @@ main() {
     while true; do
         show_menu
         case "$MENU_CHOICE" in
-            1) download_video ;;
-            2) download_playlist ;;
-            3) choose_default_quality ;;
-            4) download_audio ;;
-            5) show_video_info_menu ;;
-            6) show_history ;;
-            7) show_download_dir_menu ;;
-            8) update_ytdlp ;;
-            9) system_check ;;
+            1) download_video || true ;;
+            2) download_playlist || true ;;
+            3) choose_default_quality || true ;;
+            4) download_audio || true ;;
+            5) show_video_info_menu || true ;;
+            6) show_history || true ;;
+            7) show_download_dir_menu || true ;;
+            8) update_ytdlp || true ;;
+            9) system_check || true ;;
+            10) show_cookie_menu || true ;;
             0)
                 echo ""
                 log_ok "Tạm biệt!"
