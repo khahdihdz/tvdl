@@ -17,7 +17,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.3.4"
+APP_VERSION="1.3.5"
 APP_AUTHOR="Khahdihdz"
 APP_URL="https://khahdihdz.github.io"
 
@@ -385,13 +385,26 @@ check_storage() {
 # ---------------------------------------------------------------------------
 
 show_banner() {
+    # Logo dạng "thẻ mở": không có viền phải, nên chữ tiếng Việt có dấu
+    # không bao giờ làm lệch khung trên mọi độ rộng terminal.
+    local rule="────────────────────────────────────"
+    local cols="${COLUMNS:-80}"
+    local meta="${APP_NAME} v${APP_VERSION} · by ${APP_AUTHOR}"
+
+    [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+    if (( cols >= 62 )); then
+        meta+=" · ${APP_URL}"
+    fi
+
     clear 2>/dev/null || true
-    echo -e "${C_CYAN}╔══════════════════════════════════════════╗${C_RESET}"
-    echo -e "${C_CYAN}║${C_RESET}${C_BOLD}         TERMUX VIDEO DOWNLOADER          ${C_RESET}${C_CYAN}║${C_RESET}"
-    echo -e "${C_CYAN}║${C_RESET}         Video & Ảnh đa nền tảng          ${C_CYAN}║${C_RESET}"
-    echo -e "${C_CYAN}╚══════════════════════════════════════════╝${C_RESET}"
-    echo -e "  YouTube · Facebook · Instagram · X · Xiaohongshu"
-    echo -e "        ${APP_NAME} v${APP_VERSION} · by ${APP_AUTHOR} · ${C_CYAN}${APP_URL}${C_RESET}"
+    echo -e "  ${C_CYAN}┌${rule}${C_RESET}"
+    echo -e "  ${C_GREEN}│${C_RESET}  ${C_GREEN}${C_BOLD}▶${C_RESET}  ${C_BOLD}${APP_NAME}${C_RESET}"
+    echo -e "  ${C_GREEN}│${C_RESET}     ${C_CYAN}Termux Video Downloader${C_RESET}"
+    echo -e "  ${C_GREEN}│${C_RESET}     Tải video & ảnh đa nền tảng"
+    echo -e "  ${C_CYAN}└${rule}${C_RESET}"
+    echo "     YouTube · Facebook · Instagram"
+    echo "     X (Twitter) · Xiaohongshu"
+    echo -e "     ${C_CYAN}${meta}${C_RESET}"
 }
 
 show_menu() {
