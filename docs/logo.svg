@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="tvdl-title">
+  <title id="tvdl-title">TVDL — Termux Video Downloader</title>
+  <defs>
+    <linearGradient id="tvdl-bg" x1="10" y1="4" x2="54" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#13223c"/>
+      <stop offset="1" stop-color="#080f1d"/>
+    </linearGradient>
+    <linearGradient id="tvdl-accent" x1="12" y1="10" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#34d399"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="62" height="62" rx="16" fill="url(#tvdl-bg)" stroke="url(#tvdl-accent)" stroke-width="1.5"/>
+  <rect x="4.25" y="4.25" width="55.5" height="55.5" rx="13" fill="none" stroke="#ffffff" stroke-opacity=".06"/>
+
+  <path d="M24.5 17 L43 30.2 L24.5 43.4 Z"
+        fill="url(#tvdl-accent)"
+        stroke="url(#tvdl-accent)"
+        stroke-width="4"
+        stroke-linejoin="round"/>
+
+  <rect x="21.5" y="47.8" width="21" height="4.4" rx="2.2"
+        fill="url(#tvdl-accent)" opacity=".7"/>
+</svg>
