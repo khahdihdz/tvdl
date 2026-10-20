@@ -1,0 +1,53 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Lấy mã nguồn
+        uses: actions/checkout@v4
+
+      - name: Tạo metadata phiên bản
+        run: |
+          set -euo pipefail
+          VERSION="$(grep -oP 'APP_VERSION="\K[^"]+' tvdl.sh | head -n1 || true)"
+          [ -n "$VERSION" ] || VERSION="unknown"
+          COMMIT_DATE="$(git log -1 --format=%cI)"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg commit "$GITHUB_SHA" \
+            --arg short "${GITHUB_SHA:0:7}" \
+            --arg date "$COMMIT_DATE" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            '{version:$version, commit:$commit, short:$short, date:$date, repo:$repo}' \
+            > docs/version.json
+          cat docs/version.json
+
+      - name: Cấu hình Pages
+        uses: actions/configure-pages@v5
+
+      - name: Đóng gói trang
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Triển khai lên Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
