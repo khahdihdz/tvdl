@@ -129,6 +129,7 @@ Khi chạy `tvdl` (hoặc `./tvdl.sh`), script sẽ:
 ```
 
 - **Tải video (1):** dán URL YouTube/Facebook/Instagram/X/Xiaohongshu → xem thông tin video → chọn chất lượng (1–8, mặc định lấy theo mục 3) → xác nhận trước khi tải → file MP4 (hoặc audio nếu chọn "Chỉ audio"). Nếu bài đăng là **album/carousel nhiều ảnh hoặc video** (thường gặp trên Instagram), script tự tải **toàn bộ các item** và đặt tên file khác nhau để không ghi đè lên nhau; kết quả sau khi tải xong liệt kê đầy đủ từng file.
+- **Xiaohongshu:** TVDL tự chuẩn hóa link chia sẻ (kể cả link `/login?redirectPath=...` do app tạo ra và link rút gọn `xhslink.com`) rồi đọc trực tiếp trang để lấy luồng video, không phụ thuộc extractor của yt-dlp. Chọn chất lượng 1–8 vẫn áp dụng bình thường.
 - **Tải playlist (2):** hỗ trợ tải toàn bộ, một khoảng (1–10), hoặc các chỉ số tuỳ chọn (`1,3,5`). Tên file theo mẫu `001 - Tên video.mp4`. Chọn "Chỉ audio" ở bước chất lượng sẽ tải playlist dưới dạng audio (MP3/M4A/OPUS).
 - **Chỉ tải audio (4):** xuất MP3 / M4A / OPUS, không giả bitrate. Định dạng chọn gần nhất được ghi nhớ cho lần sau. Cũng hỗ trợ tải nhiều item nếu URL là album/carousel.
 - **Xem thông tin video (5):** hiển thị tiêu đề, uploader, thời lượng, độ phân giải mà không tải.
@@ -181,7 +182,8 @@ Các nền tảng thường xuyên thay đổi cơ chế, nên nếu tải lỗi
 | Video/bài đăng riêng tư / yêu cầu đăng nhập (`not available to everyone`, `login required`...) | Nạp cookie tài khoản của bạn qua menu **10** rồi thử lại |
 | Facebook/Instagram giới hạn khu vực / thay đổi cơ chế | Kiểm tra lại URL, thử video khác, hoặc cập nhật yt-dlp |
 | X (Twitter) báo `No video could be found in this tweet` | Bài đăng đó chỉ có ảnh — yt-dlp **không hỗ trợ tải ảnh từ X** dù ở bản mới nhất (xem mục 8). Lưu ảnh thủ công bằng trình duyệt |
-| Xiaohongshu báo `No video formats found` | Bài đó là dạng ảnh/图文 (yt-dlp chỉ tải được video), hoặc link rút gọn `xhslink.com` chưa mở ra URL đầy đủ — mở link bằng trình duyệt rồi dán URL `xiaohongshu.com/explore/...` |
+| Xiaohongshu báo `Unsupported URL` hoặc mở ra trang đăng nhập | Dán lại link chia sẻ từ app (TVDL tự tách `redirectPath`). Nếu vẫn lỗi: mở link bằng trình duyệt, đăng nhập rồi copy URL `xiaohongshu.com/explore/...` (kèm `xsec_token`) |
+| Xiaohongshu báo `No video formats found` | Bài dạng ảnh/图文 (TVDL chỉ tải được video). Nếu là video: thử nạp cookie Xiaohongshu qua menu **10** rồi tải lại |
 | Không tìm thấy chất lượng đã chọn (`Requested format is not available`) | Script hỏi có muốn tự động chọn chất lượng gần nhất không |
 | Mất mạng / tải bị gián đoạn | Chạy lại — script hỗ trợ tiếp tục tải dở (`-c`) |
 | Không đủ dung lượng / không có quyền storage | Chạy `termux-setup-storage`, kiểm tra dung lượng máy |
@@ -244,13 +246,18 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
 - Chỉ hỗ trợ nội dung công khai hoặc nội dung bạn có quyền truy cập qua cookie hợp lệ.
 - Không hỗ trợ Facebook có DRM/CAPTCHA.
 - **X (Twitter): không hỗ trợ tải ảnh**, kể cả khi yt-dlp đã cập nhật bản mới nhất. Đây là giới hạn cố định trong extractor của yt-dlp — extractor chủ động bỏ qua media loại ảnh và chỉ xử lý video/GIF, nên tweet chỉ có ảnh sẽ luôn báo `No video could be found in this tweet`. Instagram không bị giới hạn này.
-- **Xiaohongshu: chỉ tải được video.** Bài dạng ảnh/图文 sẽ báo `No video formats found`; link rút gọn `xhslink.com` nên được mở bằng trình duyệt để lấy URL đầy đủ trước khi dán vào TVDL.
+- **Xiaohongshu: chỉ tải được video**, không tải album ảnh/图文. TVDL tự xử lý link chia sẻ/login và đọc trực tiếp trang; nội dung riêng tư vẫn cần cookie Xiaohongshu (menu 10).
 - Tốc độ tải phụ thuộc vào kết nối mạng và giới hạn phía nền tảng nguồn.
 
 ---
 
 ## 9. Lịch sử phiên bản
 
+- **v1.3.4**
+  - Tự chuẩn hóa link chia sẻ Xiaohongshu: tách URL bài viết từ `/login?redirectPath=...`, theo redirect `xhslink.com`, bỏ tham số rác, giữ `xsec_token` / `xsec_source`.
+  - Thêm bộ đọc Xiaohongshu trực tiếp từ HTML, tải được cả khi yt-dlp báo `No video formats found`.
+  - Ưu tiên luồng H.264 khi cùng độ phân giải để phát được trên nhiều máy.
+  - Gợi ý lỗi rõ hơn khi link là trang đăng nhập (`Unsupported URL`).
 - **v1.3.3**
   - Hiển thị bảng **xác nhận đã lưu cookie** (số cookie, định dạng nhận được, đường dẫn, bản sao lưu) sau khi nạp/dán.
   - Thêm dòng `Đang kiểm tra cookie...` để biết TVDL đang xử lý.
