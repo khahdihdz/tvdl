@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TVDL — Termux Video Downloader</title>
+<meta name="description" content="Tải video và audio từ YouTube, Facebook, Instagram, X (Twitter), Xiaohongshu ngay trên Termux (Android). Không root, không server, không API trả phí.">
+<meta name="theme-color" content="#070b14">
+<meta property="og:title" content="TVDL — Termux Video Downloader">
+<meta property="og:description" content="Tải video & audio đa nền tảng ngay trên Termux. Cài một lần, gõ tvdl là chạy.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%96%B6%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<style>
+  :root{
+    --bg:#070b14;
+    --panel:#0f172a;
+    --panel-2:#111c33;
+    --line:#1e293b;
+    --text:#e2e8f0;
+    --muted:#94a3b8;
+    --accent:#34d399;
+    --accent-2:#38bdf8;
+    --warn:#fbbf24;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+    background:
+      radial-gradient(900px 500px at 15% -10%, rgba(56,189,248,.18), transparent 60%),
+      radial-gradient(700px 500px at 90% 0%, rgba(52,211,153,.14), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent-2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  .skip{position:absolute;left:-999px;top:0;background:var(--accent);color:#04121a;padding:10px 16px;border-radius:0 0 10px 0;z-index:100}
+  .skip:focus{left:0}
+
+  header.nav{
+    position:sticky;top:0;z-index:20;
+    background:rgba(7,11,20,.78);
+    backdrop-filter:blur(12px);
+    border-bottom:1px solid rgba(30,41,59,.7);
+  }
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px}
+  .brand{display:flex;align-items:baseline;gap:10px;color:var(--text);font-weight:800;letter-spacing:.5px;font-size:1.15rem}
+  .brand:hover{text-decoration:none}
+  .brand span{font-size:.72rem;font-weight:500;color:var(--muted);letter-spacing:0}
+  nav{display:flex;align-items:center;gap:20px;font-size:.92rem}
+  nav a{color:var(--muted)}
+  nav a:hover{color:var(--text);text-decoration:none}
+  nav a.gh{border:1px solid var(--line);padding:6px 12px;border-radius:999px;color:var(--text)}
+
+  .hero{padding:76px 0 40px;text-align:center}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:.78rem;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);
+    border:1px solid rgba(52,211,153,.35);background:rgba(52,211,153,.08);
+    padding:6px 12px;border-radius:999px;margin-bottom:20px;
+  }
+  .pulse{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(52,211,153,.5);animation:pulse 2s infinite}
+  @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(52,211,153,0)}100%{box-shadow:0 0 0 0 rgba(52,211,153,0)}}
+  h1{font-size:clamp(2rem,6vw,3.6rem);line-height:1.1;margin:0 0 18px;letter-spacing:-1px}
+  h1 .grad{background:linear-gradient(100deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lead{max-width:640px;margin:0 auto;color:var(--muted);font-size:1.05rem}
+  .actions{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;margin:30px 0 22px}
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:12px;
+    font-weight:600;font-size:.95rem;border:1px solid transparent;transition:transform .15s ease,background .15s ease;
+  }
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+  .btn-primary{background:linear-gradient(100deg,var(--accent),#22d3ee);color:#04121a}
+  .btn-ghost{background:rgba(15,23,42,.7);border-color:var(--line);color:var(--text)}
+  .version{display:inline-flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;color:var(--muted);font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .version .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .version a{font-family:inherit}
+
+  .chips{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin:34px auto 0;max-width:760px}
+  .chip{
+    border:1px solid var(--line);background:rgba(15,23,42,.6);
+    padding:7px 14px;border-radius:999px;font-size:.85rem;color:#cbd5e1;
+  }
+  .chip b{color:var(--text);font-weight:600}
+
+  section{padding:56px 0 10px}
+  .section-head{max-width:680px;margin-bottom:30px}
+  h2{font-size:clamp(1.4rem,3.2vw,1.9rem);margin:0 0 8px;letter-spacing:-.4px}
+  .section-head p{margin:0;color:var(--muted)}
+  .kicker{font-size:.75rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-2);font-weight:700;margin-bottom:8px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:16px}
+  .card{
+    background:linear-gradient(160deg,rgba(17,28,51,.9),rgba(15,23,42,.75));
+    border:1px solid var(--line);border-radius:var(--radius);padding:20px;
+  }
+  .card .ico{font-size:1.4rem;line-height:1;margin-bottom:10px;display:block}
+  .card h3{margin:0 0 6px;font-size:1rem}
+  .card p{margin:0;color:var(--muted);font-size:.9rem}
+  .card code{font-size:.8rem;background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.2);padding:1px 6px;border-radius:6px;color:#bae6fd}
+
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;counter-reset:step}
+  .step{position:relative;padding-left:52px}
+  .step::before{
+    counter-increment:step;content:counter(step);
+    position:absolute;left:0;top:0;width:34px;height:34px;border-radius:10px;
+    display:grid;place-items:center;font-weight:800;font-size:.9rem;
+    background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.35);color:var(--accent);
+  }
+  .step h3{margin:2px 0 4px;font-size:.98rem}
+  .step p{margin:0;color:var(--muted);font-size:.88rem}
+
+  .codebox{position:relative;margin:0}
+  .codebox pre{
+    margin:0;padding:20px 18px;border-radius:var(--radius);border:1px solid var(--line);
+    background:#060a12;overflow:auto;font-size:.86rem;line-height:1.7;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    color:#d7e3f4;
+  }
+  .codebox pre .c{color:#64748b}
+  .copy-btn{
+    position:absolute;top:10px;right:10px;cursor:pointer;
+    background:rgba(56,189,248,.12);color:#bae6fd;border:1px solid rgba(56,189,248,.3);
+    padding:6px 10px;border-radius:8px;font-size:.75rem;font-weight:600;font-family:inherit;
+  }
+  .copy-btn:hover{background:rgba(56,189,248,.22)}
+
+  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:26px;align-items:start}
+  .highlight{
+    border:1px solid rgba(251,191,36,.3);background:rgba(251,191,36,.06);
+    border-radius:var(--radius);padding:20px 22px;margin-top:18px;
+  }
+  .highlight h3{margin:0 0 6px;font-size:.98rem;color:var(--warn)}
+  .highlight p{margin:0;color:#d6c9a8;font-size:.88rem}
+
+  .table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--radius);background:rgba(15,23,42,.5)}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:540px}
+  th,td{padding:12px 16px;text-align:left;border-bottom:1px solid rgba(30,41,59,.7)}
+  th{background:rgba(17,28,51,.8);font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+  tr:last-child td{border-bottom:0}
+  td code{background:rgba(148,163,184,.1);border:1px solid rgba(148,163,184,.18);padding:2px 7px;border-radius:6px;color:#e2e8f0;white-space:nowrap;font-size:.82rem}
+  td.meaning{color:#cbd5e1}
+
+  .note{
+    margin-top:24px;border-left:3px solid var(--accent-2);
+    background:rgba(56,189,248,.06);padding:14px 18px;border-radius:0 12px 12px 0;
+    color:#cbd5e1;font-size:.9rem;
+  }
+  .note strong{color:var(--text)}
+  .note code{font-size:.82rem;background:rgba(56,189,248,.1);padding:1px 6px;border-radius:6px;color:#bae6fd}
+
+  footer{border-top:1px solid var(--line);margin-top:70px;padding:30px 0 46px;color:var(--muted);font-size:.86rem}
+  .foot-inner{display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;align-items:center}
+  .foot-links{display:flex;flex-wrap:wrap;gap:18px}
+
+  @media (max-width:820px){
+    .split{grid-template-columns:1fr}
+    nav a:not(.gh){display:none}
+    .hero{padding-top:56px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .pulse{animation:none}
+    .btn{transition:none}
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Bỏ qua điều hướng</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="./">TVDL <span>Termux Video Downloader</span></a>
+    <nav aria-label="Điều hướng chính">
+      <a href="#features">Tính năng</a>
+      <a href="#install">Cài đặt</a>
+      <a href="#commands">Lệnh</a>
+      <a class="gh" href="https://github.com/khahdihdz/tvdl" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero wrap">
+    <span class="eyebrow"><span class="pulse" aria-hidden="true"></span> Chạy trực tiếp trên Termux</span>
+    <h1>Tải video &amp; audio<br><span class="grad">ngay trên Android</span></h1>
+    <p class="lead">
+      TVDL là công cụ dòng lệnh gọn nhẹ cho Termux: tải video từ YouTube, Facebook,
+      Instagram, X (Twitter) và Xiaohongshu — kèm tải audio, playlist, cookie đăng nhập
+      và cập nhật tự động. Không cần root, không cần server riêng.
+    </p>
+    <div class="actions">
+      <a class="btn btn-primary" href="#install">Bắt đầu cài đặt →</a>
+      <a class="btn btn-ghost" href="https://github.com/khahdihdz/tvdl" target="_blank" rel="noopener">Xem mã nguồn</a>
+    </div>
+    <div class="version" id="version" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="version-text">Đang tải phiên bản…</span>
+    </div>
+
+    <div class="chips" aria-label="Nền tảng hỗ trợ">
+      <span class="chip"><b>YouTube</b></span>
+      <span class="chip"><b>Facebook</b></span>
+      <span class="chip"><b>Instagram</b></span>
+      <span class="chip"><b>X (Twitter)</b></span>
+      <span class="chip"><b>Xiaohongshu</b></span>
+      <span class="chip">Ảnh &amp; carousel Instagram</span>
+    </div>
+  </section>
+
+  <section id="features" class="wrap">
+    <div class="section-head">
+      <div class="kicker">Tính năng</div>
+      <h2>Mọi thứ bạn cần trong một lệnh</h2>
+      <p>TVDL gói sẵn yt-dlp và ffmpeg thành một menu tiếng Việt dễ dùng, kèm các tiện ích mà dòng lệnh thuần còn thiếu.</p>
+    </div>
+
+    <div class="grid">
+      <article class="card">
+        <span class="ico" aria-hidden="true">🎬</span>
+        <h3>Đa nền tảng</h3>
+        <p>Tải video từ YouTube, Facebook, Instagram, X và Xiaohongshu. Tự nhận diện nền tảng từ URL.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">🎚️</span>
+        <h3>Chọn chất lượng 1–8</h3>
+        <p>Từ tốt nhất đến 360p, hoặc chỉ audio. Chất lượng mặc định được ghi nhớ cho lần tải sau.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">🎧</span>
+        <h3>Audio MP3 / M4A / OPUS</h3>
+        <p>Tách audio bằng ffmpeg, không giả bitrate. Hỗ trợ cả playlist ở chế độ chỉ tải audio.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">📃</span>
+        <h3>Tải playlist</h3>
+        <p>Tải toàn bộ, một khoảng (1–10) hoặc danh sách tuỳ chọn như <code>1,3,5</code>; đặt tên file theo thứ tự.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">🍪</span>
+        <h3>Cookie thông minh</h3>
+        <p>Dán cookie Netscape, JSON hay chuỗi <code>Cookie:</code> đều được. Tự chuyển định dạng, sao lưu bản cũ và xác nhận rõ ràng.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">🀄</span>
+        <h3>Xiaohongshu thông minh</h3>
+        <p>Tự tách link chia sẻ <code>/login?redirectPath=…</code> và đọc trực tiếp trang để lấy luồng video, kể cả khi yt-dlp chưa hỗ trợ.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">⚡</span>
+        <h3>Lệnh <code>tvdl</code> &amp; tự cập nhật</h3>
+        <p>Cài một lần để gõ <code>tvdl</code> từ bất kỳ đâu. Cập nhật từ GitHub bằng <code>tvdl --update</code>, có kiểm tra và sao lưu.</p>
+      </article>
+      <article class="card">
+        <span class="ico" aria-hidden="true">🛠️</span>
+        <h3>Ổn định &amp; dễ sửa lỗi</h3>
+        <p>Lịch sử tải, log lỗi chi tiết, kiểm tra hệ thống, gợi ý xử lý theo từng loại lỗi. Không cần root.</p>
+      </article>
+    </div>
+  </section>
+
+  <section id="install" class="wrap">
+    <div class="split">
+      <div>
+        <div class="section-head">
+          <div class="kicker">Cài đặt</div>
+          <h2>Chạy trong vài phút</h2>
+          <p>Cần Termux (nên cài từ F-Droid). Sao chép từng khối lệnh bên dưới.</p>
+        </div>
+
+        <div class="codebox">
+          <button class="copy-btn" type="button" data-copy="install-code">Sao chép</button>
+          <pre id="install-code"><code><span class="c"># 1. Cập nhật gói và cài phụ thuộc</span>
+pkg update
+pkg install python ffmpeg curl
+python -m pip install -U yt-dlp
+
+<span class="c"># 2. Tải TVDL và cài lệnh tvdl</span>
+curl -fsSL https://raw.githubusercontent.com/khahdihdz/tvdl/main/tvdl.sh -o tvdl.sh
+bash tvdl.sh --install
+
+<span class="c"># 3. Mở TVDL</span>
+tvdl</code></pre>
+        </div>
+
+        <div class="note">
+          <strong>Cấp quyền bộ nhớ:</strong> chạy <code>termux-setup-storage</code> một lần để TVDL lưu file vào thư mục Download.
+          Nếu muốn tự cập nhật sau này, chỉ cần gõ <code>tvdl --update</code>.
+        </div>
+      </div>
+
+      <div>
+        <div class="steps">
+          <div class="step">
+            <h3>Cài phụ thuộc</h3>
+            <p>Python, ffmpeg, curl và yt-dlp — tất cả đều có sẵn trong kho Termux/pip.</p>
+          </div>
+          <div class="step">
+            <h3>Cài lệnh <code>tvdl</code></h3>
+            <p>Script tự chọn <code>$PREFIX/bin</code> trên Termux hoặc <code>~/.local/bin</code> trên Linux.</p>
+          </div>
+          <div class="step">
+            <h3>Chọn nền tảng &amp; tải</h3>
+            <p>Dán URL, xem thông tin, chọn chất lượng rồi xác nhận. File nằm trong thư mục bạn đã chọn.</p>
+          </div>
+        </div>
+
+        <div class="highlight">
+          <h3>Gỡ cài đặt an toàn</h3>
+          <p>Chạy <code>tvdl --uninstall</code>. TVDL chỉ xóa file do chính nó cài (nhận diện bằng marker), không đụng tới lệnh trùng tên của công cụ khác.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="commands" class="wrap">
+    <div class="section-head">
+      <div class="kicker">Tham khảo</div>
+      <h2>Các lệnh thường dùng</h2>
+      <p>Không có tham số, TVDL mở menu tương tác. Các tham số dưới đây dùng cho script hoặc thao tác nhanh.</p>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th scope="col">Lệnh</th><th scope="col">Ý nghĩa</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>tvdl</code></td><td class="meaning">Mở menu chính</td></tr>
+          <tr><td><code>tvdl --install</code></td><td class="meaning">Cài lệnh gõ nhanh <code>tvdl</code></td></tr>
+          <tr><td><code>tvdl --uninstall</code></td><td class="meaning">Gỡ lệnh <code>tvdl</code> đã cài</td></tr>
+          <tr><td><code>tvdl --status</code></td><td class="meaning">Xem trạng thái và vị trí cài lệnh</td></tr>
+          <tr><td><code>tvdl --update</code></td><td class="meaning">Cập nhật TVDL từ GitHub</td></tr>
+          <tr><td><code>tvdl --no-color</code></td><td class="meaning">Tắt màu ANSI</td></tr>
+          <tr><td><code>tvdl -y</code></td><td class="meaning">Không hỏi xác nhận (dùng với <code>--install</code>, <code>--uninstall</code>, <code>--update</code>)</td></tr>
+          <tr><td><code>tvdl --help</code></td><td class="meaning">Hiển thị trợ giúp</td></tr>
+          <tr><td><code>tvdl --version</code></td><td class="meaning">Hiển thị phiên bản</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="codebox" style="margin-top:22px">
+      <button class="copy-btn" type="button" data-copy="update-code">Sao chép</button>
+      <pre id="update-code"><code><span class="c"># Cập nhật TVDL lên bản mới nhất</span>
+tvdl --update</code></pre>
+    </div>
+  </section>
+
+  <section id="auto" class="wrap">
+    <div class="section-head">
+      <div class="kicker">Tự động hoá</div>
+      <h2>Trang này luôn theo kịp mã nguồn</h2>
+      <p>Mỗi commit trên nhánh <code>main</code> đều kích hoạt GitHub Actions: phiên bản và commit hiện tại được tạo tự động rồi triển khai lên GitHub Pages.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <h3>Bạn push commit</h3>
+        <p>Thay đổi trong <code>tvdl.sh</code>, <code>docs/</code> hoặc bất kỳ file nào trên <code>main</code>.</p>
+      </div>
+      <div class="step">
+        <h3>Actions tạo metadata</h3>
+        <p>Workflow đọc <code>APP_VERSION</code>, commit SHA và thời gian, ghi vào <code>version.json</code>.</p>
+      </div>
+      <div class="step">
+        <h3>Pages triển khai</h3>
+        <p>Artifact được đẩy lên GitHub Pages. Số phiên bản ở đầu trang tự cập nhật, không cần sửa HTML.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      Theo dõi các lần triển khai tại
+      <a href="https://github.com/khahdihdz/tvdl/actions/workflows/pages.yml" target="_blank" rel="noopener">GitHub Actions → Deploy GitHub Pages</a>.
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <div>
+      <strong style="color:var(--text)">TVDL</strong> · Made by Khahdihdz · Giấy phép MIT<br>
+      <span id="foot-note">Trang tự động triển khai bởi GitHub Actions.</span>
+    </div>
+    <div class="foot-links">
+      <a href="https://github.com/khahdihdz/tvdl" target="_blank" rel="noopener">Mã nguồn</a>
+      <a href="https://github.com/khahdihdz/tvdl#readme" target="_blank" rel="noopener">README</a>
+      <a href="https://github.com/khahdihdz/tvdl/issues" target="_blank" rel="noopener">Báo lỗi</a>
+      <a href="https://khahdihdz.github.io" target="_blank" rel="noopener">khahdihdz.github.io</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var REPO = "khahdihdz/tvdl";
+
+  function formatDate(value) {
+    if (!value) return "";
+    var date = new Date(value);
+    if (isNaN(date.getTime())) return "";
+    return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric" });
+  }
+
+  function showVersion(data) {
+    var holder = document.getElementById("version");
+    var text = document.getElementById("version-text");
+    if (!holder || !text) return;
+
+    var parts = [];
+    if (data.version) parts.push("TVDL v" + data.version);
+    if (data.short) parts.push("commit " + data.short);
+    if (data.date) parts.push(formatDate(data.date));
+    text.textContent = parts.length ? parts.join(" · ") : "TVDL trên GitHub";
+
+    if (data.commit) {
+      var link = document.createElement("a");
+      link.href = "https://github.com/" + REPO + "/commit/" + data.commit;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "chi tiết";
+      link.style.marginLeft = "2px";
+      holder.appendChild(link);
+    }
+
+    if (data.date) {
+      var foot = document.getElementById("foot-note");
+      if (foot) foot.textContent = "Trang tự động triển khai bởi GitHub Actions · cập nhật " + formatDate(data.date) + ".";
+    }
+  }
+
+  function loadVersion() {
+    fetch("./version.json?t=" + Date.now(), { cache: "no-store" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .catch(function () { return null; })
+      .then(function (data) {
+        if (data && (data.commit || data.version)) {
+          showVersion(data);
+          return;
+        }
+        return fetch("https://api.github.com/repos/" + REPO + "/commits/main", { cache: "no-store" })
+          .then(function (res) { return res.ok ? res.json() : null; })
+          .then(function (commit) {
+            if (!commit || !commit.sha) return;
+            showVersion({
+              short: commit.sha.slice(0, 7),
+              commit: commit.sha,
+              date: commit.commit && commit.commit.committer ? commit.commit.committer.date : ""
+            });
+          })
+          .catch(function () {});
+      });
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise(function (resolve, reject) {
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      try {
+        document.execCommand("copy") ? resolve() : reject(new Error("copy failed"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        area.remove();
+      }
+    });
+  }
+
+  document.querySelectorAll("[data-copy]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var target = document.getElementById(button.getAttribute("data-copy"));
+      if (!target) return;
+      var original = button.textContent;
+      copyText(target.innerText.trim())
+        .then(function () {
+          button.textContent = "Đã chép ✓";
+        })
+        .catch(function () {
+          button.textContent = "Không chép được";
+        })
+        .then(function () {
+          window.setTimeout(function () { button.textContent = original; }, 1800);
+        });
+    });
+  });
+
+  loadVersion();
+})();
+</script>
+</body>
+</html>
