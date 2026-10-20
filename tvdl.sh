@@ -6,6 +6,8 @@
 #
 # Author:  Khahdihdz
 # Website: https://khahdihdz.github.io
+#
+# TVDL_INSTALL_MARKER - dấu nhận diện file do TVDL cài (dùng khi gỡ lệnh)
 ###############################################################################
 
 set -Eeuo pipefail
@@ -15,7 +17,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.1.0"
+APP_VERSION="1.3.0"
 APP_AUTHOR="Khahdihdz"
 APP_URL="https://khahdihdz.github.io"
 
@@ -27,28 +29,62 @@ HISTORY_FILENAME="tvdl_history.log"
 ERROR_LOG_FILENAME="tvdl_error.log"
 # HISTORY_FILE / ERROR_LOG_FILE are derived from DEFAULT_DOWNLOAD_DIR (see get_history_file / get_error_log_file)
 
+# Gõ nhanh `tvdl` + tự cập nhật
+INSTALL_NAME="tvdl"
+INSTALL_MARKER="TVDL_INSTALL_MARKER"
+SELF_UPDATE_URL="https://raw.githubusercontent.com/khahdihdz/tvdl/main/tvdl.sh"
+
 # Termux has no reliably writable /tmp (Android sandboxing can deny it),
 # so transient run logs go under our own app state dir instead.
 TMP_DIR="${TMPDIR:-$STATE_DIR/tmp}"
 
 DEFAULT_DOWNLOAD_DIR="/storage/emulated/0/Download/TermuxVideo"
 DEFAULT_FORMAT="mp4"
-DEFAULT_QUALITY="best"
+DEFAULT_QUALITY="1"
 DEFAULT_AUDIO_FORMAT="mp3"
 DEFAULT_COLOR="1"
+
+# Safe defaults until load_config / setup_colors run
+DOWNLOAD_DIR="$DEFAULT_DOWNLOAD_DIR"
+AUDIO_FORMAT="$DEFAULT_AUDIO_FORMAT"
+COLOR="$DEFAULT_COLOR"
 
 USE_COLOR=1
 NO_COLOR_FLAG=0
 
+# YTDLP_CMD / COOKIE_ARGS are bash arrays (no eval, no shell injection)
+YTDLP_CMD=()
+COOKIE_ARGS=()
+
 # ---------------------------------------------------------------------------
-# 1. ARG PARSING (--no-color)
+# 1. ARG PARSING
 # ---------------------------------------------------------------------------
+
+ACTION="menu"
+ASSUME_YES=0
+BAD_ARG=""
+INTERACTIVE=1
 
 for arg in "$@"; do
     case "$arg" in
         --no-color) NO_COLOR_FLAG=1 ;;
+        --install) ACTION="install" ;;
+        --uninstall|--remove) ACTION="uninstall" ;;
+        --status) ACTION="status" ;;
+        --update) ACTION="update" ;;
+        -y|--yes) ASSUME_YES=1 ;;
+        -h|--help) ACTION="help" ;;
+        -V|--version) ACTION="version" ;;
+        *)
+            ACTION="badarg"
+            BAD_ARG="$arg"
+            ;;
     esac
 done
+
+if [[ "$ACTION" != "menu" ]]; then
+    INTERACTIVE=0
+fi
 
 # ---------------------------------------------------------------------------
 # 2. COLORS
@@ -74,15 +110,17 @@ log_warn()  { echo -e "${C_YELLOW}[!]${C_RESET} $1"; }
 log_info()  { echo -e "${C_CYAN}[i]${C_RESET} $1"; }
 
 pause_screen() {
+    (( INTERACTIVE )) || return 0
     echo ""
-    read -rp "Nhấn Enter để quay lại menu..." _
+    read -rp "Nhấn Enter để quay lại menu..." _ || true
 }
 
 ask_yes_no() {
     # $1 = prompt, default Yes
     local prompt="$1"
     local ans
-    read -rp "$prompt [Y/n] " ans
+    (( INTERACTIVE )) || return 1
+    read -rp "$prompt [Y/n] " ans || return 1
     ans="${ans,,}"
     if [[ -z "$ans" || "$ans" == "y" || "$ans" == "yes" ]]; then
         return 0
@@ -121,6 +159,14 @@ handle_error() {
         echo "    (nhấn giữ ảnh > Lưu ảnh)."
         echo "  - Nếu bạn chắc bài đăng có video, có thể tài khoản đó riêng tư"
         echo "    → thử menu 10 (Cookies) rồi tải lại."
+    elif echo "$detail" | grep -qiE "no video formats found"; then
+        echo "  - Nếu đây là bài Xiaohongshu (Tiểu Hồng Thư) chỉ có ẢNH (không"
+        echo "    video): yt-dlp hiện chỉ tải được video từ Xiaohongshu, chưa"
+        echo "    hỗ trợ tải bài dạng ảnh/图文 — cần lưu ảnh thủ công."
+        echo "  - Nếu là link rút gọn xhslink.com, thử mở link đó trên trình"
+        echo "    duyệt để lấy URL đầy đủ dạng xiaohongshu.com/explore/... rồi"
+        echo "    dán lại URL đó."
+        echo "  - Nếu bài đăng riêng tư, thử menu 10 (Cookies) rồi tải lại."
     else
         echo "  - Kiểm tra URL"
         echo "  - Kiểm tra kết nối Internet"
@@ -130,7 +176,7 @@ handle_error() {
     pause_screen
 }
 
-trap 'log_fail "Đã xảy ra lỗi không mong muốn (dòng $LINENO). Script sẽ tiếp tục chạy."; sleep 1' ERR
+trap 'log_fail "Đã xảy ra lỗi không mong muốn (dòng $LINENO)."' ERR
 
 # ---------------------------------------------------------------------------
 # 5. CONFIG LOAD / SAVE
@@ -154,24 +200,34 @@ EOF
 
     DOWNLOAD_DIR="${DOWNLOAD_DIR:-$DEFAULT_DOWNLOAD_DIR}"
     DEFAULT_FORMAT="${DEFAULT_FORMAT:-mp4}"
-    DEFAULT_QUALITY="${DEFAULT_QUALITY:-best}"
+    DEFAULT_QUALITY="${DEFAULT_QUALITY:-1}"
     AUDIO_FORMAT="${AUDIO_FORMAT:-mp3}"
     COLOR="${COLOR:-1}"
+
+    # Migrate old/unknown values so the menu always shows a usable default
+    valid_quality "$DEFAULT_QUALITY" || DEFAULT_QUALITY="1"
+    case "$AUDIO_FORMAT" in
+        mp3|m4a|opus) ;;
+        *) AUDIO_FORMAT="mp3" ;;
+    esac
     USE_COLOR="$COLOR"
 
     mkdir -p "$DEFAULT_DOWNLOAD_DIR" 2>/dev/null || true
     touch "$(get_history_file)" 2>/dev/null || true
     touch "$(get_error_log_file)" 2>/dev/null || true
+
+    resolve_ytdlp
 }
 
 save_config() {
-    cat > "$CONFIG_FILE" <<EOF
-DOWNLOAD_DIR=$DOWNLOAD_DIR
-DEFAULT_FORMAT=$DEFAULT_FORMAT
-DEFAULT_QUALITY=$DEFAULT_QUALITY
-AUDIO_FORMAT=$AUDIO_FORMAT
-COLOR=$COLOR
-EOF
+    # %q keeps paths with spaces/UTF-8 safe when the file is sourced again
+    {
+        printf 'DOWNLOAD_DIR=%q\n' "$DOWNLOAD_DIR"
+        printf 'DEFAULT_FORMAT=%q\n' "$DEFAULT_FORMAT"
+        printf 'DEFAULT_QUALITY=%q\n' "$DEFAULT_QUALITY"
+        printf 'AUDIO_FORMAT=%q\n' "$AUDIO_FORMAT"
+        printf 'COLOR=%q\n' "$COLOR"
+    } > "$CONFIG_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -182,6 +238,26 @@ is_termux() {
     [[ -d "/data/data/com.termux" ]] && return 0
     command -v termux-info >/dev/null 2>&1 && return 0
     return 1
+}
+
+resolve_ytdlp() {
+    YTDLP_CMD=()
+    if command -v yt-dlp >/dev/null 2>&1; then
+        YTDLP_CMD=(yt-dlp)
+    elif command -v python3 >/dev/null 2>&1; then
+        YTDLP_CMD=(python3 -m yt_dlp)
+    elif command -v python >/dev/null 2>&1; then
+        YTDLP_CMD=(python -m yt_dlp)
+    fi
+
+    COOKIE_ARGS=()
+    if [[ -f "$COOKIES_FILE" ]]; then
+        COOKIE_ARGS=(--cookies "$COOKIES_FILE")
+    fi
+}
+
+have_ytdlp() {
+    ((${#YTDLP_CMD[@]} > 0))
 }
 
 check_dependencies() {
@@ -208,7 +284,7 @@ check_dependencies() {
         missing+=("ffmpeg")
     fi
 
-    if command -v yt-dlp >/dev/null 2>&1; then
+    if command -v yt-dlp >/dev/null 2>&1 || have_ytdlp; then
         echo -e "${C_GREEN}[✓]${C_RESET} yt-dlp"
     else
         echo -e "${C_RED}[✗]${C_RESET} yt-dlp"
@@ -220,6 +296,7 @@ check_dependencies() {
         log_warn "Chưa cài: ${missing[*]}"
         if ask_yes_no "Tự động cài đặt?"; then
             install_dependencies "${missing[@]}"
+            resolve_ytdlp
         else
             log_warn "Bỏ qua cài đặt. Một số chức năng có thể không hoạt động."
         fi
@@ -286,11 +363,12 @@ check_storage() {
 # ---------------------------------------------------------------------------
 
 show_banner() {
-    clear
+    clear 2>/dev/null || true
     echo -e "${C_CYAN}╔══════════════════════════════════════════╗${C_RESET}"
     echo -e "${C_CYAN}║${C_RESET}${C_BOLD}         TERMUX VIDEO DOWNLOADER          ${C_RESET}${C_CYAN}║${C_RESET}"
-    echo -e "${C_CYAN}║${C_RESET}    YouTube + Facebook + Instagram + X    ${C_CYAN}║${C_RESET}"
+    echo -e "${C_CYAN}║${C_RESET}         Video & Ảnh đa nền tảng          ${C_CYAN}║${C_RESET}"
     echo -e "${C_CYAN}╚══════════════════════════════════════════╝${C_RESET}"
+    echo -e "  YouTube · Facebook · Instagram · X · Xiaohongshu"
     echo -e "        ${APP_NAME} v${APP_VERSION} · by ${APP_AUTHOR} · ${C_CYAN}${APP_URL}${C_RESET}"
 }
 
@@ -307,22 +385,21 @@ show_menu() {
     echo -e "  ${C_GREEN}8.${C_RESET} Cập nhật yt-dlp"
     echo -e "  ${C_GREEN}9.${C_RESET} Kiểm tra hệ thống"
     echo -e "  ${C_GREEN}10.${C_RESET} Cookies đăng nhập (Instagram/Facebook riêng tư)"
+    echo -e "  ${C_GREEN}11.${C_RESET} Cài đặt / gỡ lệnh tvdl"
     echo -e "  ${C_RED}0.${C_RESET} Thoát"
     echo ""
     echo -e "Thư mục tải hiện tại: ${C_YELLOW}$DOWNLOAD_DIR${C_RESET}"
     echo ""
-    read -rp "Chọn: " MENU_CHOICE
+    if ! read -rp "Chọn: " MENU_CHOICE; then
+        echo ""
+        log_ok "Tạm biệt!"
+        exit 0
+    fi
 }
 
 # ---------------------------------------------------------------------------
 # 9. UTILITIES
 # ---------------------------------------------------------------------------
-
-sanitize_filename() {
-    # Removes characters invalid on most filesystems: / \ : * ? " < > |
-    local name="$1"
-    echo "$name" | sed 's/[\/\\:\*\?"<>|]/_/g'
-}
 
 detect_platform() {
     local url="$1"
@@ -334,6 +411,8 @@ detect_platform() {
         echo "Instagram"
     elif [[ "$url" =~ (twitter\.com|x\.com)/ ]]; then
         echo "X (Twitter)"
+    elif [[ "$url" =~ xiaohongshu\.com|xhslink\.com ]]; then
+        echo "Xiaohongshu"
     else
         echo "Không xác định"
     fi
@@ -341,7 +420,7 @@ detect_platform() {
 
 check_internet() {
     if command -v curl >/dev/null 2>&1; then
-        curl -s --max-time 5 -o /dev/null https://www.google.com && return 0
+        curl -fsS --max-time 5 -o /dev/null https://www.google.com && return 0
     fi
     return 1
 }
@@ -382,24 +461,6 @@ log_error_to_file() {
     } >> "$(get_error_log_file)" 2>/dev/null || true
 }
 
-yt_dlp_bin() {
-    if command -v yt-dlp >/dev/null 2>&1; then
-        echo "yt-dlp"
-    elif command -v python3 >/dev/null 2>&1; then
-        echo "python3 -m yt_dlp"
-    else
-        echo ""
-    fi
-}
-
-cookie_args() {
-    if [[ -f "$COOKIES_FILE" ]]; then
-        echo "--cookies $COOKIES_FILE"
-    else
-        echo ""
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # 9b. COOKIE MANAGEMENT (needed for Instagram/Facebook age-restricted,
 #     private, or "not available to everyone" content)
@@ -416,10 +477,10 @@ show_cookie_menu() {
         echo "  3. Xóa cookie đã lưu"
         echo "  4. Hướng dẫn lấy cookie Instagram/Facebook"
         echo "  0. Quay lại"
-        read -rp "Chọn: " cchoice
+        read -rp "Chọn: " cchoice || return 0
         case "$cchoice" in
             1)
-                read -rp "Nhập đường dẫn file cookies.txt: " cpath
+                read -rp "Nhập đường dẫn file cookies.txt: " cpath || cpath=""
                 cpath="${cpath/#\~/$HOME}"
                 if [[ -z "$cpath" || ! -f "$cpath" ]]; then
                     log_fail "Không tìm thấy file: $cpath"
@@ -427,6 +488,7 @@ show_cookie_menu() {
                     mkdir -p "$STATE_DIR"
                     cp "$cpath" "$COOKIES_FILE"
                     chmod 600 "$COOKIES_FILE"
+                    resolve_ytdlp
                     log_ok "Đã nạp cookie vào $COOKIES_FILE"
                 fi
                 pause_screen
@@ -441,12 +503,14 @@ show_cookie_menu() {
                     echo "$line" >> "$COOKIES_FILE"
                 done
                 chmod 600 "$COOKIES_FILE"
+                resolve_ytdlp
                 log_ok "Đã lưu cookie vào $COOKIES_FILE"
                 pause_screen
                 ;;
             3)
                 if [[ -f "$COOKIES_FILE" ]]; then
                     rm -f "$COOKIES_FILE"
+                    resolve_ytdlp
                     log_ok "Đã xóa cookie."
                 else
                     log_info "Chưa có cookie nào để xóa."
@@ -475,14 +539,274 @@ show_cookie_menu() {
 }
 
 # ---------------------------------------------------------------------------
+# 9c. INSTALL / UNINSTALL `tvdl` COMMAND + SELF UPDATE
+# ---------------------------------------------------------------------------
+
+script_path() {
+    local src="${BASH_SOURCE[0]:-$0}"
+    local resolved=""
+    if command -v readlink >/dev/null 2>&1; then
+        resolved="$(readlink -f -- "$src" 2>/dev/null || true)"
+    fi
+    [[ -n "$resolved" ]] && src="$resolved"
+    case "$src" in
+        /*) ;;
+        *) src="$PWD/$src" ;;
+    esac
+    echo "$src"
+}
+
+install_bin_dir() {
+    if [[ -n "${PREFIX:-}" && -d "$PREFIX/bin" ]]; then
+        echo "$PREFIX/bin"
+    elif is_termux && [[ -d "/data/data/com.termux/files/usr/bin" ]]; then
+        echo "/data/data/com.termux/files/usr/bin"
+    else
+        echo "$HOME/.local/bin"
+    fi
+}
+
+installed_path() {
+    echo "$(install_bin_dir)/$INSTALL_NAME"
+}
+
+fix_shebang() {
+    # Termux's bash lives outside /usr/bin; on regular Linux installs the
+    # copied script needs the local bash path instead.
+    local file="$1" bash_path
+    is_termux && return 0
+    bash_path="$(command -v bash 2>/dev/null || true)"
+    [[ -n "$bash_path" ]] || return 0
+    sed -i "1s|^#!.*|#!$bash_path|" "$file" 2>/dev/null || true
+}
+
+is_tvdl_script() {
+    # Accept both the new marker and older TVDL copies installed manually
+    # (before v1.3.0 the script had no marker).
+    [[ -f "$1" ]] || return 1
+    grep -q "$INSTALL_MARKER" "$1" 2>/dev/null && return 0
+    head -n 12 "$1" 2>/dev/null | grep -q "TVDL - Termux Video Downloader" && return 0
+    return 1
+}
+
+path_hint() {
+    local dir="$1"
+    case ":$PATH:" in
+        *":$dir:"*) ;;
+        *)
+            log_warn "$dir chưa có trong PATH."
+            echo "  Thêm dòng sau vào ~/.bashrc rồi mở lại Termux:"
+            echo "    export PATH=\"$dir:\$PATH\""
+            ;;
+    esac
+}
+
+install_command() {
+    local src dir target
+    src="$(script_path)"
+    dir="$(install_bin_dir)"
+    target="$dir/$INSTALL_NAME"
+
+    if [[ ! -f "$src" ]]; then
+        log_fail "Không tìm thấy file script: $src"
+        return 1
+    fi
+    if ! mkdir -p "$dir" 2>/dev/null; then
+        log_fail "Không tạo được thư mục: $dir"
+        return 1
+    fi
+    if [[ -e "$target" && "$src" != "$target" ]] && ! is_tvdl_script "$target"; then
+        log_warn "Đã có file khác tại $target."
+        if (( ! ASSUME_YES )); then
+            ask_yes_no "Ghi đè bằng TVDL?" || { log_warn "Đã hủy."; return 1; }
+        fi
+    fi
+
+    if [[ "$src" == "$target" ]]; then
+        chmod 755 "$target" 2>/dev/null || true
+        log_ok "Lệnh tvdl đã nằm đúng vị trí: $target"
+    else
+        if ! cp "$src" "$target" 2>/dev/null; then
+            log_fail "Không sao chép được vào $target (thiếu quyền?)."
+            return 1
+        fi
+        chmod 755 "$target" 2>/dev/null || true
+        fix_shebang "$target"
+        log_ok "Đã cài lệnh: $target"
+    fi
+
+    path_hint "$dir"
+    return 0
+}
+
+uninstall_command() {
+    local target
+    target="$(installed_path)"
+
+    if [[ ! -e "$target" ]]; then
+        log_info "Chưa cài lệnh tvdl ($target không tồn tại)."
+        return 0
+    fi
+    if ! is_tvdl_script "$target"; then
+        log_fail "Từ chối xóa: $target không phải do TVDL cài."
+        return 1
+    fi
+    if (( ! ASSUME_YES )); then
+        ask_yes_no "Gỡ lệnh tvdl tại $target?" || { log_warn "Đã hủy."; return 1; }
+    fi
+
+    if [[ "$(script_path)" == "$target" ]]; then
+        log_warn "Bạn đang chạy chính file sắp xóa; phiên hiện tại vẫn tiếp tục bình thường."
+    fi
+    if ! rm -f "$target" 2>/dev/null; then
+        log_fail "Không xóa được $target (thiếu quyền?)."
+        return 1
+    fi
+    log_ok "Đã gỡ lệnh tvdl."
+    return 0
+}
+
+show_install_status() {
+    local target dir
+    target="$(installed_path)"
+    dir="$(install_bin_dir)"
+
+    echo "TVDL:        v$APP_VERSION"
+    echo "Đang chạy:   $(script_path)"
+    echo "Vị trí cài:  $target"
+
+    if [[ ! -e "$target" ]]; then
+        echo "Trạng thái:  Chưa cài"
+    elif is_tvdl_script "$target"; then
+        echo "Trạng thái:  Đã cài"
+    else
+        echo "Trạng thái:  Có file khác cùng tên"
+    fi
+
+    case ":$PATH:" in
+        *":$dir:"*) echo "PATH:        OK ($dir)" ;;
+        *)          echo "PATH:        Thiếu $dir" ;;
+    esac
+}
+
+update_tvdl() {
+    local src tmp backup target new_version
+    src="$(script_path)"
+    mkdir -p "$TMP_DIR" 2>/dev/null || true
+    tmp="$TMP_DIR/tvdl_update_$$.sh"
+
+    if ! command -v curl >/dev/null 2>&1; then
+        handle_error "Thiếu curl để cập nhật TVDL." "Cài bằng: pkg install curl"
+        return 1
+    fi
+
+    echo "Đang kiểm tra bản mới từ GitHub..."
+    if ! curl -fsSL --max-time 30 "$SELF_UPDATE_URL" -o "$tmp"; then
+        rm -f "$tmp"
+        handle_error "Không tải được bản cập nhật." "URL: $SELF_UPDATE_URL"
+        return 1
+    fi
+
+    if [[ ! -s "$tmp" ]] || ! is_tvdl_script "$tmp" || ! bash -n "$tmp" 2>/dev/null; then
+        rm -f "$tmp"
+        handle_error "Bản tải về không hợp lệ." "Đã hủy cập nhật, script hiện tại giữ nguyên."
+        return 1
+    fi
+
+    if [[ "$(cat "$tmp")" == "$(cat "$src")" ]]; then
+        rm -f "$tmp"
+        log_ok "Bạn đang dùng bản mới nhất (v$APP_VERSION)."
+        return 0
+    fi
+
+    new_version="$(sed -n 's/^APP_VERSION="\(.*\)"$/\1/p' "$tmp" | head -n1)"
+    echo "Phiên bản hiện tại: v$APP_VERSION"
+    echo "Phiên bản mới:      v${new_version:-?}"
+
+    if (( ! ASSUME_YES )); then
+        ask_yes_no "Cập nhật ngay?" || { rm -f "$tmp"; log_warn "Đã hủy."; return 1; }
+    fi
+
+    backup="$src.bak.$(date '+%Y%m%d-%H%M%S')"
+    cp "$src" "$backup" 2>/dev/null || true
+    if ! cat "$tmp" > "$src"; then
+        log_fail "Không ghi được $src. Bản sao lưu: $backup"
+        rm -f "$tmp"
+        return 1
+    fi
+    chmod 755 "$src" 2>/dev/null || true
+    fix_shebang "$src"
+    rm -f "$tmp"
+    log_ok "Đã cập nhật: $src"
+    [[ -f "$backup" ]] && log_info "Bản sao lưu: $backup"
+
+    target="$(installed_path)"
+    if [[ -f "$target" && "$target" != "$src" ]] && is_tvdl_script "$target"; then
+        if cp "$src" "$target" 2>/dev/null; then
+            chmod 755 "$target" 2>/dev/null || true
+            fix_shebang "$target"
+            log_ok "Đã đồng bộ lệnh tvdl: $target"
+        fi
+    fi
+
+    log_info "Khởi động lại TVDL để dùng bản mới."
+    return 0
+}
+
+show_install_menu() {
+    while true; do
+        show_banner
+        echo ""
+        local target
+        target="$(installed_path)"
+        if is_tvdl_script "$target"; then
+            echo -e "Lệnh tvdl: ${C_GREEN}Đã cài${C_RESET} ($target)"
+        else
+            echo -e "Lệnh tvdl: ${C_YELLOW}Chưa cài${C_RESET} ($target)"
+        fi
+        echo ""
+        echo "  1. Cài đặt lệnh gõ nhanh tvdl"
+        echo "  2. Gỡ lệnh tvdl"
+        echo "  3. Xem trạng thái cài đặt"
+        echo "  4. Cập nhật TVDL từ GitHub"
+        echo "  0. Quay lại"
+        read -rp "Chọn: " ichoice || return 0
+        case "$ichoice" in
+            1) install_command || true; pause_screen ;;
+            2) uninstall_command || true; pause_screen ;;
+            3) echo ""; show_install_status; pause_screen ;;
+            4) update_tvdl || true; pause_screen ;;
+            0) return ;;
+            *) ;;
+        esac
+    done
+}
+
+show_help() {
+    echo "${APP_NAME} v${APP_VERSION} — ${APP_AUTHOR} (${APP_URL})"
+    echo ""
+    echo "Cách dùng: ${INSTALL_NAME} [tuỳ chọn]"
+    echo ""
+    echo "  (không tuỳ chọn)   Mở menu chính"
+    echo "  --install          Cài lệnh gõ nhanh '${INSTALL_NAME}' vào PATH"
+    echo "  --uninstall        Gỡ lệnh '${INSTALL_NAME}' đã cài"
+    echo "  --status           Xem trạng thái cài đặt lệnh '${INSTALL_NAME}'"
+    echo "  --update           Cập nhật TVDL từ GitHub"
+    echo "  --no-color         Tắt màu ANSI"
+    echo "  -y, --yes          Không hỏi xác nhận (dùng với --install/--uninstall/--update)"
+    echo "  -h, --help         Hiển thị trợ giúp này"
+    echo "  -V, --version      Hiển thị phiên bản"
+}
+
+# ---------------------------------------------------------------------------
 # 10. VIDEO INFO
 # ---------------------------------------------------------------------------
 
 get_video_info() {
     local url="$1"
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
-    if [[ -z "$ytdlp" ]]; then
+    local info
+
+    if ! have_ytdlp; then
         handle_error "Không tìm thấy yt-dlp." "Cài đặt bằng: python -m pip install -U yt-dlp"
         return 1
     fi
@@ -492,8 +816,7 @@ get_video_info() {
     echo "Nền tảng: $platform"
     echo "Đang lấy thông tin..."
 
-    local info
-    if ! info=$(eval "$ytdlp $(cookie_args) --no-warnings --print '%(title)s|||%(uploader)s|||%(duration_string)s|||%(resolution)s' \"$url\"" 2>"$TMP_DIR/tvdl_err.log"); then
+    if ! info=$("${YTDLP_CMD[@]}" "${COOKIE_ARGS[@]}" --no-warnings --print '%(title)s|||%(uploader)s|||%(duration_string)s|||%(resolution)s' "$url" 2>"$TMP_DIR/tvdl_err.log"); then
         handle_error "Không lấy được thông tin video." "$(cat "$TMP_DIR/tvdl_err.log" 2>/dev/null)"
         return 1
     fi
@@ -516,7 +839,7 @@ get_video_info() {
 show_video_info_menu() {
     show_banner
     echo ""
-    read -rp "Nhập URL video: " url
+    read -rp "Nhập URL video: " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
     get_video_info "$url" || true
     pause_screen
@@ -554,6 +877,50 @@ quality_to_format_string() {
     esac
 }
 
+valid_quality() {
+    [[ "${1:-}" =~ ^[1-8]$ ]]
+}
+
+ask_quality() {
+    # $1 = prompt label. Only the chosen value goes to stdout, so callers can
+    # safely use qchoice="$(ask_quality ...)".
+    local title="$1"
+    local default="$DEFAULT_QUALITY"
+    local qchoice
+    valid_quality "$default" || default="1"
+
+    read -rp "${title} (1-8) [mặc định $default]: " qchoice || qchoice=""
+    qchoice="${qchoice:-$default}"
+    valid_quality "$qchoice" || qchoice="$default"
+    echo "$qchoice"
+}
+
+ask_audio_format() {
+    # $1 = default choice. Menu text goes to stderr, result to stdout.
+    local default="$1"
+    local achoice afmt
+    case "$AUDIO_FORMAT" in
+        m4a) default=2 ;;
+        opus) default=3 ;;
+    esac
+
+    {
+        echo ""
+        echo "Chọn định dạng audio:"
+        echo "  1. MP3"
+        echo "  2. M4A"
+        echo "  3. OPUS"
+    } >&2
+    read -rp "Chọn [mặc định $default]: " achoice || achoice=""
+    achoice="${achoice:-$default}"
+    case "$achoice" in
+        2|m4a) afmt="m4a" ;;
+        3|opus) afmt="opus" ;;
+        *) afmt="mp3" ;;
+    esac
+    echo "$afmt"
+}
+
 # ---------------------------------------------------------------------------
 # 12. DOWNLOAD VIDEO
 # ---------------------------------------------------------------------------
@@ -561,13 +928,11 @@ quality_to_format_string() {
 download_video() {
     show_banner
     echo ""
-    echo "Nhập URL Facebook, YouTube, Instagram hoặc X (Twitter):"
-    read -rp "> " url
+    echo "Nhập URL Facebook, YouTube, Instagram, X (Twitter) hoặc Xiaohongshu:"
+    read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
 
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
-    if [[ -z "$ytdlp" ]]; then
+    if ! have_ytdlp; then
         handle_error "Không tìm thấy yt-dlp." "Cài đặt bằng: python -m pip install -U yt-dlp"
         return
     fi
@@ -578,15 +943,15 @@ download_video() {
     echo "Nền tảng: $platform"
 
     if [[ "$platform" == "Không xác định" ]]; then
-        log_warn "URL không thuộc YouTube, Facebook, Instagram hoặc X. yt-dlp sẽ vẫn thử tải."
+        log_warn "URL không thuộc YouTube, Facebook, Instagram, X hoặc Xiaohongshu. yt-dlp sẽ vẫn thử tải."
     fi
 
     get_video_info "$url" || return 0
 
     echo ""
     show_formats
-    read -rp "Chọn (1-8) [mặc định 1]: " qchoice
-    qchoice="${qchoice:-1}"
+    local qchoice
+    qchoice="$(ask_quality "Chọn")"
     local fmt
     fmt="$(quality_to_format_string "$qchoice")"
 
@@ -622,7 +987,7 @@ download_video() {
     local start_marker="$TMP_DIR/.dl_marker_$$"
     touch "$start_marker"
     set +e
-    eval "$ytdlp $(cookie_args) -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    "${YTDLP_CMD[@]}" "${COOKIE_ARGS[@]}" -f "$fmt" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o "$outtmpl" "$url" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
@@ -636,7 +1001,7 @@ download_video() {
                 for fallback_fmt in "bv*+ba/b" "b"; do
                     [[ "$fallback_fmt" == "$fmt" ]] && continue
                     set +e
-                    eval "$ytdlp $(cookie_args) -f \"$fallback_fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+                    "${YTDLP_CMD[@]}" "${COOKIE_ARGS[@]}" -f "$fallback_fmt" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o "$outtmpl" "$url" 2>&1 | tee "$log_file"
                     rc=${PIPESTATUS[0]}
                     set -e
                     [[ $rc -eq 0 ]] && break
@@ -680,40 +1045,53 @@ download_playlist() {
     show_banner
     echo ""
     echo "Nhập URL playlist:"
-    read -rp "> " url
+    read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
 
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
-    if [[ -z "$ytdlp" ]]; then
+    if ! have_ytdlp; then
         handle_error "Không tìm thấy yt-dlp."
         return
     fi
 
-    local range_args=""
+    local range_args=()
     if ask_yes_no "Tải toàn bộ playlist?"; then
-        range_args=""
+        range_args=()
     else
         echo "1. Tất cả"
         echo "2. Video 1-10"
         echo "3. Chỉ video được chọn (nhập chỉ số, ví dụ 1,3,5)"
-        read -rp "Chọn: " rchoice
+        read -rp "Chọn: " rchoice || rchoice=""
         case "$rchoice" in
-            2) range_args="--playlist-items 1-10" ;;
+            2) range_args=(--playlist-items "1-10") ;;
             3)
-                read -rp "Nhập danh sách chỉ số (vd 1,3,5): " idxs
-                range_args="--playlist-items $idxs"
+                read -rp "Nhập danh sách chỉ số (vd 1,3,5): " idxs || idxs=""
+                if [[ -n "$idxs" ]]; then
+                    range_args=(--playlist-items "$idxs")
+                fi
                 ;;
-            *) range_args="" ;;
+            *) range_args=() ;;
         esac
     fi
 
     show_formats
-    read -rp "Chọn (1-8) [mặc định 1]: " qchoice
-    qchoice="${qchoice:-1}"
+    local qchoice
+    qchoice="$(ask_quality "Chọn")"
     local fmt
     fmt="$(quality_to_format_string "$qchoice")"
-    [[ "$fmt" == "audio-only" ]] && fmt="ba/b"
+
+    local audio_fmt=""
+    if [[ "$fmt" == "audio-only" ]]; then
+        fmt="ba/b"
+        audio_fmt="$(ask_audio_format "$AUDIO_FORMAT")"
+    fi
+
+    local merge_args=()
+    local extra_args=()
+    if [[ -n "$audio_fmt" ]]; then
+        extra_args=(-x --audio-format "$audio_fmt")
+    else
+        merge_args=(--merge-output-format mp4)
+    fi
 
     echo ""
     echo "Thư mục:      $DOWNLOAD_DIR"
@@ -728,7 +1106,8 @@ download_playlist() {
     local log_file="$TMP_DIR/tvdl_playlist.log"
 
     set +e
-    eval "$ytdlp $(cookie_args) $range_args -f \"$fmt\" --merge-output-format mp4 -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    "${YTDLP_CMD[@]}" "${COOKIE_ARGS[@]}" "${range_args[@]}" "${extra_args[@]}" "${merge_args[@]}" \
+        -f "$fmt" -c --no-warnings --ignore-errors --restrict-filenames -o "$outtmpl" "$url" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
@@ -751,33 +1130,23 @@ download_audio() {
     show_banner
     echo ""
     echo "Nhập URL video:"
-    read -rp "> " url
+    read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
     download_audio_with_url "$url"
 }
 
 download_audio_with_url() {
     local url="$1"
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
-    if [[ -z "$ytdlp" ]]; then
+
+    if ! have_ytdlp; then
         handle_error "Không tìm thấy yt-dlp."
         return
     fi
 
-    echo ""
-    echo "Chọn định dạng audio:"
-    echo "  1. MP3"
-    echo "  2. M4A"
-    echo "  3. OPUS"
-    read -rp "Chọn [mặc định 1]: " achoice
-    achoice="${achoice:-1}"
     local afmt
-    case "$achoice" in
-        2) afmt="m4a" ;;
-        3) afmt="opus" ;;
-        *) afmt="mp3" ;;
-    esac
+    afmt="$(ask_audio_format "$AUDIO_FORMAT")"
+    AUDIO_FORMAT="$afmt"
+    save_config
 
     local platform
     platform="$(detect_platform "$url")"
@@ -799,7 +1168,7 @@ download_audio_with_url() {
     touch "$start_marker"
 
     set +e
-    eval "$ytdlp $(cookie_args) -x --audio-format $afmt -c --no-warnings --ignore-errors --restrict-filenames -o \"$outtmpl\" \"$url\"" 2>&1 | tee "$log_file"
+    "${YTDLP_CMD[@]}" "${COOKIE_ARGS[@]}" -x --audio-format "$afmt" -c --no-warnings --ignore-errors --restrict-filenames -o "$outtmpl" "$url" 2>&1 | tee "$log_file"
     local rc=${PIPESTATUS[0]}
     set -e
 
@@ -837,7 +1206,7 @@ show_history() {
         echo "  3. Tìm kiếm lịch sử"
         echo "  4. Xem log lỗi"
         echo "  0. Quay lại"
-        read -rp "Chọn: " hchoice
+        read -rp "Chọn: " hchoice || return 0
         local hist_file err_file
         hist_file="$(get_history_file)"
         err_file="$(get_error_log_file)"
@@ -845,7 +1214,11 @@ show_history() {
             1)
                 echo ""
                 if [[ -s "$hist_file" ]]; then
-                    tail -n 50 "$hist_file" | column -t -s '|'
+                    if command -v column >/dev/null 2>&1; then
+                        tail -n 50 "$hist_file" | column -t -s '|'
+                    else
+                        tail -n 50 "$hist_file"
+                    fi
                 else
                     log_info "Chưa có lịch sử tải."
                 fi
@@ -859,9 +1232,13 @@ show_history() {
                 pause_screen
                 ;;
             3)
-                read -rp "Nhập từ khóa: " kw
+                read -rp "Nhập từ khóa: " kw || kw=""
                 echo ""
-                grep -i --color=never "$kw" "$hist_file" || log_info "Không tìm thấy."
+                if [[ -n "$kw" ]]; then
+                    grep -i --color=never -- "$kw" "$hist_file" || log_info "Không tìm thấy."
+                else
+                    log_info "Từ khóa trống."
+                fi
                 pause_screen
                 ;;
             4)
@@ -893,7 +1270,7 @@ show_download_dir_menu() {
         echo "  2. Đổi thư mục"
         echo "  3. Hiển thị thư mục hiện tại"
         echo "  0. Quay lại"
-        read -rp "Chọn: " dchoice
+        read -rp "Chọn: " dchoice || return 0
         case "$dchoice" in
             1)
                 if command -v termux-open >/dev/null 2>&1; then
@@ -904,7 +1281,8 @@ show_download_dir_menu() {
                 pause_screen
                 ;;
             2)
-                read -rp "Nhập đường dẫn thư mục mới: " newdir
+                read -rp "Nhập đường dẫn thư mục mới: " newdir || newdir=""
+                newdir="${newdir/#\~/$HOME}"
                 if [[ -n "$newdir" ]]; then
                     mkdir -p "$newdir" 2>/dev/null && {
                         DOWNLOAD_DIR="$newdir"
@@ -931,11 +1309,9 @@ show_download_dir_menu() {
 update_ytdlp() {
     show_banner
     echo ""
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
     local old_version="Không rõ"
-    if [[ -n "$ytdlp" ]]; then
-        old_version=$(eval "$ytdlp --version" 2>/dev/null || echo "Không rõ")
+    if have_ytdlp; then
+        old_version=$("${YTDLP_CMD[@]}" --version 2>/dev/null || echo "Không rõ")
     fi
     echo "Phiên bản cũ: $old_version"
     echo ""
@@ -953,8 +1329,11 @@ update_ytdlp() {
         return
     fi
 
-    local new_version
-    new_version=$(eval "$(yt_dlp_bin) --version" 2>/dev/null || echo "Không rõ")
+    resolve_ytdlp
+    local new_version="Không rõ"
+    if have_ytdlp; then
+        new_version=$("${YTDLP_CMD[@]}" --version 2>/dev/null || echo "Không rõ")
+    fi
     echo ""
     echo "Phiên bản mới: $new_version"
     log_ok "Cập nhật thành công."
@@ -969,6 +1348,8 @@ system_check() {
     show_banner
     echo ""
 
+    echo "TVDL:         v$APP_VERSION"
+
     if is_termux; then echo "Termux:       OK"; else echo "Termux:       Không phát hiện"; fi
 
     if command -v python3 >/dev/null 2>&1; then
@@ -979,10 +1360,8 @@ system_check() {
         echo "Python:       [✗] Chưa cài"
     fi
 
-    local ytdlp
-    ytdlp="$(yt_dlp_bin)"
-    if [[ -n "$ytdlp" ]]; then
-        echo "yt-dlp:       $(eval "$ytdlp --version" 2>/dev/null || echo "Không rõ")"
+    if have_ytdlp; then
+        echo "yt-dlp:       $("${YTDLP_CMD[@]}" --version 2>/dev/null || echo "Không rõ")"
     else
         echo "yt-dlp:       [✗] Chưa cài"
     fi
@@ -1013,6 +1392,12 @@ system_check() {
         echo "Internet:     [✗] Không có kết nối"
     fi
 
+    if is_tvdl_script "$(installed_path)"; then
+        echo "Lệnh tvdl:     OK ($(installed_path))"
+    else
+        echo "Lệnh tvdl:     Chưa cài (menu 11 hoặc --install)"
+    fi
+
     pause_screen
 }
 
@@ -1024,11 +1409,15 @@ choose_default_quality() {
     show_banner
     echo ""
     show_formats
-    read -rp "Chọn chất lượng mặc định [hiện tại: $DEFAULT_QUALITY]: " qchoice
+    read -rp "Chọn chất lượng mặc định (1-8) [hiện tại: $DEFAULT_QUALITY]: " qchoice || qchoice=""
     if [[ -n "$qchoice" ]]; then
-        DEFAULT_QUALITY="$qchoice"
-        save_config
-        log_ok "Đã lưu chất lượng mặc định."
+        if valid_quality "$qchoice"; then
+            DEFAULT_QUALITY="$qchoice"
+            save_config
+            log_ok "Đã lưu chất lượng mặc định: $qchoice"
+        else
+            log_fail "Chỉ nhận giá trị 1-8."
+        fi
     fi
     pause_screen
 }
@@ -1039,6 +1428,39 @@ choose_default_quality() {
 
 main() {
     setup_colors
+
+    case "$ACTION" in
+        help) show_help; exit 0 ;;
+        version) echo "${APP_NAME} v${APP_VERSION}"; exit 0 ;;
+        badarg)
+            log_fail "Tham số không hợp lệ: $BAD_ARG"
+            echo ""
+            show_help
+            exit 2
+            ;;
+        install)
+            load_config
+            setup_colors
+            if install_command; then exit 0; else exit 1; fi
+            ;;
+        uninstall)
+            load_config
+            setup_colors
+            if uninstall_command; then exit 0; else exit 1; fi
+            ;;
+        status)
+            load_config
+            setup_colors
+            show_install_status
+            exit 0
+            ;;
+        update)
+            load_config
+            setup_colors
+            if update_tvdl; then exit 0; else exit 1; fi
+            ;;
+    esac
+
     load_config
     setup_colors   # re-apply in case COLOR came from config
     check_dependencies
@@ -1057,6 +1479,7 @@ main() {
             8) update_ytdlp || true ;;
             9) system_check || true ;;
             10) show_cookie_menu || true ;;
+            11) show_install_menu || true ;;
             0)
                 echo ""
                 log_ok "Tạm biệt!"
