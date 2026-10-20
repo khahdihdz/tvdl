@@ -136,7 +136,7 @@ Khi chạy `tvdl` (hoặc `./tvdl.sh`), script sẽ:
 - **Thư mục tải (7):** mở (cần Termux:API), đổi, hoặc xem thư mục hiện tại. Đường dẫn có dấu cách vẫn được lưu đúng.
 - **Cập nhật yt-dlp (8):** chạy `pip install -U yt-dlp`, hiển thị phiên bản cũ/mới. Không tự cập nhật ngầm khi khởi động.
 - **Kiểm tra hệ thống (9):** trạng thái Termux, Python, yt-dlp, FFmpeg, storage, thư mục tải, kết nối mạng, phiên bản TVDL và trạng thái lệnh `tvdl`.
-- **Cookies đăng nhập (10):** nạp cookie (từ file, hoặc dán trực tiếp nội dung Netscape cookies.txt), xóa cookie đã lưu, hoặc xem hướng dẫn lấy cookie bằng extension trình duyệt. Dùng cho nội dung riêng tư / giới hạn độ tuổi trên Instagram, Facebook, X.
+- **Cookies đăng nhập (10):** nạp cookie từ file hoặc **dán trực tiếp** (Netscape, JSON, chuỗi `Cookie:` — tự nhận định dạng), xóa cookie đã lưu, hoặc xem hướng dẫn lấy cookie bằng extension trình duyệt. Dùng cho nội dung riêng tư / giới hạn độ tuổi trên Instagram, Facebook, X.
 - **Cài đặt / gỡ lệnh tvdl (11):** cài, gỡ, xem trạng thái lệnh gõ nhanh `tvdl`, và cập nhật TVDL từ GitHub.
 
 Trước khi tải, script **luôn hiển thị lại** tiêu đề / nền tảng / thời lượng / chất lượng / định dạng / thư mục và chờ xác nhận `[Y/n]` — không tự động tải khi chưa đồng ý.
@@ -176,7 +176,7 @@ Các nền tảng thường xuyên thay đổi cơ chế, nên nếu tải lỗi
 
 | Tình huống | Cách xử lý |
 |---|---|
-| `Cookies file must be Netscape formatted, not JSON` | TVDL 1.3.1+ tự chuyển JSON sang Netscape khi nạp (menu 10). Nếu vẫn lỗi: menu 10 → 3 xóa cookie rồi nạp lại file `.json`/`.txt` |
+| `Cookies file must be Netscape formatted, not JSON` | TVDL tự chuyển JSON (hoặc chuỗi `Cookie:`) sang Netscape khi nạp/dán ở menu 10. Nếu vẫn lỗi: menu 10 → 3 xóa cookie rồi nạp lại |
 | `FFmpeg chưa cài` | `pkg install ffmpeg` hoặc chọn Y khi script hỏi tự cài |
 | Video/bài đăng riêng tư / yêu cầu đăng nhập (`not available to everyone`, `login required`...) | Nạp cookie tài khoản của bạn qua menu **10** rồi thử lại |
 | Facebook/Instagram giới hạn khu vực / thay đổi cơ chế | Kiểm tra lại URL, thử video khác, hoặc cập nhật yt-dlp |
@@ -196,12 +196,18 @@ Script không bao giờ hiển thị traceback Python/Bash thô cho người dù
 
 Một số bài đăng Instagram/Facebook/X yêu cầu đăng nhập mới xem được (giới hạn độ tuổi, khu vực, hoặc tài khoản riêng tư). Vào menu **10** để:
 
-1. **Nạp cookie từ file** — chỉ đường dẫn tới file `cookies.txt` (định dạng Netscape).
-2. **Dán nội dung cookie trực tiếp** — dán nội dung, kết thúc bằng dòng `END`.
+1. **Nạp cookie từ file** — chỉ đường dẫn tới file `.txt` (Netscape) hoặc `.json`.
+2. **Dán nội dung cookie trực tiếp** — dán Netscape, JSON hoặc chuỗi `Cookie: a=b; c=d`; kết thúc bằng dòng `END` (hoặc `Ctrl+D`).
 3. **Xóa cookie đã lưu**.
 4. **Xem hướng dẫn** lấy cookie bằng extension trình duyệt (ví dụ *Get cookies.txt LOCALLY*): đăng nhập trên trình duyệt → mở bài viết cần tải → export cookie → nạp vào TVDL.
 
-TVDL nhận **cả hai** định dạng: Netscape (`.txt`) và JSON (`.json` — Chrome/EditThisCookie/Firefox). Với JSON, TVDL tự chuyển sang Netscape ngay khi nạp hoặc ở lần khởi động kế tiếp; bản gốc được giữ tại `~/.termux-video-downloader/cookies.txt.json.bak` (quyền `600`).
+TVDL tự nhận diện nội dung cookie ở **3 dạng**:
+
+- **Netscape** (`.txt`) — định dạng chuẩn của yt-dlp/curl.
+- **JSON** (`.json`) — Chrome, EditThisCookie, Firefox, Playwright… (kể cả phần rác/dòng thừa sau khối JSON).
+- **Chuỗi `Cookie:`** — `Cookie: a=b; c=d` hoặc `a=b; c=d`; TVDL sẽ hỏi tên miền (ví dụ `.facebook.com`) để tạo file đúng.
+
+Có thể nạp bằng file (mục 1) hoặc **dán trực tiếp** (mục 2). TVDL chuẩn hóa về Netscape trước khi lưu, hiển thị số cookie đã nhận, và **chỉ thay cookie cũ khi nội dung mới hợp lệ** — dán sai không làm mất cookie đang dùng. Bản gốc được giữ tại `~/.termux-video-downloader/cookies.txt.bak` (quyền `600`).
 
 Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `600`, chỉ chủ tài khoản đọc được) và tự động dùng cho mọi lượt tải sau đó. **Không chia sẻ file này cho ai** — nó chứa phiên đăng nhập tài khoản của bạn.
 
@@ -229,8 +235,13 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
 
 ## 9. Lịch sử phiên bản
 
+- **v1.3.2**
+  - **Dán cookie trực tiếp** (menu 10 → 2): tự nhận Netscape, JSON hoặc chuỗi `Cookie:`; hỏi tên miền khi cần.
+  - Chỉ thay cookie khi nội dung hợp lệ — dán sai/file lỗi **không còn xóa mất cookie cũ**.
+  - Hiển thị số cookie, lọc mã màu ANSI / dòng `END` / ký tự rác, nhận cả Netscape thiếu header.
+  - Sao lưu bản gốc tại `cookies.txt.bak` (các bản trước dùng `.json.bak` vẫn được giữ).
 - **v1.3.1**
-  - Tự nhận diện và chuyển cookie **JSON → Netscape** (menu 10, và tự chữa khi khởi động), giữ bản gốc `cookies.txt.json.bak`.
+  - Tự nhận diện và chuyển cookie **JSON → Netscape** (menu 10, và tự chữa khi khởi động).
   - Thêm gợi ý lỗi riêng khi cookie sai định dạng (`Cookies file must be Netscape formatted, not JSON`).
   - Bỏ qua phần rác sau khối JSON khi người dùng dán thừa.
 - **v1.3.0**
