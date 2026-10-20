@@ -17,7 +17,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.3.2"
+APP_VERSION="1.3.3"
 APP_AUTHOR="Khahdihdz"
 APP_URL="https://khahdihdz.github.io"
 
@@ -55,6 +55,7 @@ NO_COLOR_FLAG=0
 # YTDLP_CMD / COOKIE_ARGS are bash arrays (no eval, no shell injection)
 YTDLP_CMD=()
 COOKIE_ARGS=()
+COOKIE_LAST_FORMAT=""
 
 # ---------------------------------------------------------------------------
 # 1. ARG PARSING
@@ -486,6 +487,44 @@ cookies_count() {
     echo "${n:-0}"
 }
 
+detect_cookie_format() {
+    # Chỉ dùng để hiển thị cho người dùng biết đã nhận dạng nào
+    local f="$1"
+    local first
+    if cookies_file_is_netscape "$f"; then
+        echo "Netscape"
+        return
+    fi
+    first="$(head -c 200 "$f" 2>/dev/null | tr -d '[:space:]\357\273\277' | head -c 1)"
+    case "$first" in
+        "{"|"[") echo "JSON" ;;
+        *)       echo "Chuỗi Cookie" ;;
+    esac
+}
+
+show_cookie_result() {
+    local count fmt
+    count="$(cookies_count "$COOKIES_FILE")"
+    fmt="${COOKIE_LAST_FORMAT:-Netscape}"
+
+    echo ""
+    echo -e "${C_GREEN}────────────────────────────────────────────${C_RESET}"
+    echo -e "${C_GREEN}${C_BOLD}   ✓ ĐÃ LƯU COOKIE THÀNH CÔNG${C_RESET}"
+    echo -e "${C_GREEN}────────────────────────────────────────────${C_RESET}"
+    echo "  Số cookie:  $count"
+    if [[ "$fmt" == "Netscape" ]]; then
+        echo "  Định dạng:  Netscape"
+    else
+        echo "  Định dạng:  $fmt → Netscape"
+    fi
+    echo "  File:       $COOKIES_FILE"
+    if [[ -f "$COOKIES_FILE.bak" ]]; then
+        echo "  Sao lưu:    $COOKIES_FILE.bak"
+    fi
+    echo ""
+    echo "  Cookie này được dùng cho mọi lượt tải tiếp theo."
+}
+
 cookies_convert_file() {
     # Chuyển mọi định dạng cookie phổ biến sang Netscape.
     # $1 = nguồn, $2 = đích, $3 = tên miền (chỉ cần cho chuỗi Cookie:)
@@ -632,6 +671,7 @@ normalize_cookies_file() {
     local rc=0
 
     [[ -f "$f" ]] || return 1
+    COOKIE_LAST_FORMAT="$(detect_cookie_format "$f")"
     cookies_file_is_netscape "$f" && return 0
     [[ -s "$f" ]] || return 1
 
@@ -697,12 +737,16 @@ show_cookie_menu() {
                 else
                     local tmpc="$TMP_DIR/cookies_import.$$"
                     rm -f "$tmpc" "$tmpc.bak"
+                    echo "Đang kiểm tra cookie..."
                     if cp "$cpath" "$tmpc" 2>/dev/null && normalize_cookies_file "$tmpc"; then
                         mkdir -p "$STATE_DIR"
+                        if [[ -f "$COOKIES_FILE" ]]; then
+                            cp "$COOKIES_FILE" "$COOKIES_FILE.bak" 2>/dev/null || true
+                        fi
                         if cp "$tmpc" "$COOKIES_FILE" 2>/dev/null; then
                             chmod 600 "$COOKIES_FILE"
                             resolve_ytdlp
-                            log_ok "Đã nạp $(cookies_count "$COOKIES_FILE") cookie vào $COOKIES_FILE"
+                            show_cookie_result
                         else
                             log_fail "Không ghi được $COOKIES_FILE"
                         fi
@@ -731,12 +775,16 @@ show_cookie_menu() {
                     pause_screen
                     continue
                 fi
+                echo "Đang kiểm tra cookie..."
                 if normalize_cookies_file "$tmpc"; then
                     mkdir -p "$STATE_DIR"
+                    if [[ -f "$COOKIES_FILE" ]]; then
+                        cp "$COOKIES_FILE" "$COOKIES_FILE.bak" 2>/dev/null || true
+                    fi
                     if cp "$tmpc" "$COOKIES_FILE" 2>/dev/null; then
                         chmod 600 "$COOKIES_FILE"
                         resolve_ytdlp
-                        log_ok "Đã lưu $(cookies_count "$COOKIES_FILE") cookie vào $COOKIES_FILE"
+                        show_cookie_result
                     else
                         log_fail "Không ghi được $COOKIES_FILE"
                     fi
