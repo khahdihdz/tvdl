@@ -17,7 +17,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.3.3"
+APP_VERSION="1.3.4"
 APP_AUTHOR="Khahdihdz"
 APP_URL="https://khahdihdz.github.io"
 
@@ -56,6 +56,11 @@ NO_COLOR_FLAG=0
 YTDLP_CMD=()
 COOKIE_ARGS=()
 COOKIE_LAST_FORMAT=""
+CURRENT_URL=""
+XHS_TITLE=""
+XHS_UPLOADER=""
+XHS_DURATION_MS=0
+XHS_STREAMS=()
 
 # ---------------------------------------------------------------------------
 # 1. ARG PARSING
@@ -173,6 +178,12 @@ handle_error() {
         echo "    duyệt để lấy URL đầy đủ dạng xiaohongshu.com/explore/... rồi"
         echo "    dán lại URL đó."
         echo "  - Nếu bài đăng riêng tư, thử menu 10 (Cookies) rồi tải lại."
+    elif echo "$detail" | grep -qiE "unsupported url"; then
+        echo "  - URL không phải trang video mà là trang đăng nhập/trang chủ/link rút gọn."
+        echo "  - Xiaohongshu: mở link bằng trình duyệt, đăng nhập, rồi copy URL"
+        echo "    dạng xiaohongshu.com/explore/... hoặc /discovery/item/... (kèm xsec_token)."
+        echo "  - TVDL đã tự xử lý link chia sẻ dạng /login?redirectPath=...;"
+        echo "    nếu vẫn lỗi, nạp cookie Xiaohongshu qua menu 10 rồi thử lại."
     else
         echo "  - Kiểm tra URL"
         echo "  - Kiểm tra kết nối Internet"
@@ -411,6 +422,77 @@ show_menu() {
 # ---------------------------------------------------------------------------
 # 9. UTILITIES
 # ---------------------------------------------------------------------------
+
+resolve_share_url() {
+    # Chuẩn hóa link chia sẻ (đặc biệt Xiaohongshu) trước khi đưa cho yt-dlp:
+    # - trích URL từ đoạn text dán kèm
+    # - link /login?redirectPath=... -> URL bài viết thật
+    # - xhslink.com -> theo redirect
+    # - bỏ tham số rác, giữ xsec_token/xsec_source
+    local url="$1"
+
+    case "$url" in
+        *xhslink.com*)
+            if command -v curl >/dev/null 2>&1; then
+                local eff
+                eff="$(curl -fsSL --max-time 20 -o /dev/null -w '%{url_effective}' "$url" 2>/dev/null || true)"
+                [[ -n "$eff" ]] && url="$eff"
+            fi
+            ;;
+    esac
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "$url"
+        return 0
+    fi
+
+    python3 - "$url" <<'PYEOF'
+import re
+import sys
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+
+raw = sys.argv[1].strip().strip('"\'')
+match = re.search(r'https?://[^\s<>"\']+', raw)
+url = match.group(0) if match else raw
+url = url.rstrip(').,;')
+
+for _ in range(3):
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if "redirectPath" not in query:
+        break
+    url = unquote(query.pop("redirectPath", ""))
+
+parts = urlsplit(url)
+host = parts.netloc.lower()
+if not host.endswith("xiaohongshu.com"):
+    print(url)
+    sys.exit(0)
+
+if not host.startswith("www."):
+    host = "www." + host.lstrip(".")
+
+item = re.match(r"^/(?:explore|discovery/item)/([0-9a-fA-F]+)", parts.path)
+if not item:
+    print(urlunsplit(("https", host, parts.path, parts.query, parts.fragment)))
+    sys.exit(0)
+
+prefix = "/explore/" if parts.path.startswith("/explore/") else "/discovery/item/"
+query = dict(parse_qsl(parts.query, keep_blank_values=True))
+query.pop("redirectPath", None)
+for junk in ("app_platform", "app_version", "ignoreEngage", "apptime",
+             "shareRedId", "share_id", "share_channel", "xhsshare",
+             "author_share", "exSource", "share_from_user_hidden"):
+    query.pop(junk, None)
+
+ordered = []
+for key in ("xsec_token", "xsec_source", "type", "source"):
+    if key in query:
+        ordered.append((key, query.pop(key)))
+ordered.extend(query.items())
+print(urlunsplit(("https", host, prefix + item.group(1), urlencode(ordered), "")))
+PYEOF
+}
 
 detect_platform() {
     local url="$1"
@@ -1128,13 +1210,335 @@ show_video_info_menu() {
     echo ""
     read -rp "Nhập URL video: " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
-    get_video_info "$url" || true
+    url="$(resolve_share_url "$url")"
+    if [[ "$(detect_platform "$url")" == "Xiaohongshu" ]] && xhs_probe "$url"; then
+        echo ""
+        echo "Nền tảng:     Xiaohongshu"
+        echo "Tiêu đề:      $XHS_TITLE"
+        echo "Uploader:     ${XHS_UPLOADER:-Không rõ}"
+        echo "Thời lượng:   $(format_ms_duration "$XHS_DURATION_MS")"
+        echo "Độ phân giải: $(xhs_best_height)p"
+        echo ""
+        log_info "Đọc trực tiếp từ trang Xiaohongshu (không phụ thuộc extractor yt-dlp)."
+    else
+        get_video_info "$url" || true
+    fi
     pause_screen
 }
 
 # ---------------------------------------------------------------------------
 # 11. QUALITY SELECTION
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# 10b. XIAOHONGSHU FALLBACK (yt-dlp chưa hỗ trợ cấu trúc trang mới)
+# ---------------------------------------------------------------------------
+
+format_ms_duration() {
+    local ms="${1:-0}" s
+    [[ "$ms" =~ ^[0-9]+$ ]] || ms=0
+    s=$((ms / 1000))
+    printf '%d:%02d' $((s / 60)) $((s % 60))
+}
+
+xhs_best_height() {
+    local entry h best=0
+    for entry in "${XHS_STREAMS[@]}"; do
+        h="${entry%%|*}"
+        [[ "$h" =~ ^[0-9]+$ ]] || continue
+        (( h > best )) && best=$h
+    done
+    echo "$best"
+}
+
+xhs_safe_name() {
+    printf '%s' "$1" | tr '/\\:*?"<>|' '_' | tr '\n\r\t' '   ' | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//'
+}
+
+xhs_unique_path() {
+    local path="$1" dir base ext n=1
+    dir="$(dirname "$path")"
+    base="$(basename "$path")"
+    ext=""
+    if [[ "$base" == *.* ]]; then
+        ext=".${base##*.}"
+        base="${base%.*}"
+    fi
+    while [[ -e "$dir/$base$ext" ]]; do
+        path="$dir/$base ($n)$ext"
+        n=$((n + 1))
+    done
+    echo "$path"
+}
+
+xhs_probe() {
+    # Đọc trực tiếp trang Xiaohongshu và lấy link video CDN.
+    # Dùng khi yt-dlp báo "No video formats found" (site đổi cấu trúc).
+    local url="$1"
+    local html="$TMP_DIR/xhs_page.html"
+    local out cookie_opt=()
+
+    XHS_TITLE=""; XHS_UPLOADER=""; XHS_DURATION_MS=0; XHS_STREAMS=()
+
+    command -v curl >/dev/null 2>&1 || return 1
+    mkdir -p "$TMP_DIR" 2>/dev/null || true
+    [[ -f "$COOKIES_FILE" ]] && cookie_opt=(-b "$COOKIES_FILE")
+
+    if ! curl -fsSL --compressed --max-time 30 \
+        -A "Mozilla/5.0 (Linux; Android 15; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36" \
+        -H "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
+        "${cookie_opt[@]}" "$url" -o "$html" 2>/dev/null; then
+        return 1
+    fi
+
+    out="$(python3 - "$html" <<'PYEOF'
+import json
+import re
+import sys
+
+try:
+    html = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+except OSError:
+    sys.exit(2)
+
+
+def clean_js(text):
+    out = []
+    i = 0
+    in_str = False
+    esc = False
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if text.startswith("undefined", i):
+            out.append("null")
+            i += 9
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def find_note(node):
+    if isinstance(node, dict):
+        if "noteId" in node and ("video" in node or "imageList" in node):
+            return node
+        for value in node.values():
+            found = find_note(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = find_note(value)
+            if found:
+                return found
+    return None
+
+
+note = None
+for match in re.finditer(r"window\.__[A-Z_]+__\s*=\s*", html):
+    raw = html[match.end():]
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(clean_js(raw).lstrip())
+    except Exception:
+        continue
+    note = find_note(obj)
+    if note:
+        break
+
+if not note:
+    sys.exit(3)
+
+title = str(note.get("title") or "").strip()
+desc = str(note.get("desc") or "").strip()
+if not title:
+    title = desc.splitlines()[0] if desc else "Xiaohongshu"
+user = note.get("user") or {}
+uploader = user.get("nickname") or user.get("nickName") or ""
+
+video = note.get("video") or {}
+stream = (video.get("media") or {}).get("stream") or {}
+rows = []
+for codec, items in stream.items():
+    if not isinstance(items, list):
+        continue
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        link = item.get("masterUrl")
+        if not link and item.get("backupUrls"):
+            link = item["backupUrls"][0]
+        if not link:
+            continue
+        try:
+            height = int(item.get("height") or 0)
+        except (TypeError, ValueError):
+            height = 0
+        try:
+            bitrate = int(item.get("avgBitrate") or 0)
+        except (TypeError, ValueError):
+            bitrate = 0
+        try:
+            duration = int(item.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        rows.append((height, bitrate, duration, str(codec), str(link)))
+
+if not rows:
+    key = (video.get("consumer") or {}).get("originVideoKey")
+    if key:
+        rows.append((0, 0, 0, "direct", "https://sns-video-bd.xhscdn.com/" + str(key)))
+
+if not rows:
+    sys.exit(4)
+
+
+def flat(value):
+    return str(value).replace("\t", " ").replace("\n", " ").replace("\r", " ").strip()
+
+
+print("TITLE\t" + flat(title))
+print("UPLOADER\t" + flat(uploader))
+print("DURATION\t" + str(max(row[2] for row in rows)))
+for height, bitrate, _duration, codec, link in sorted(rows, key=lambda r: (r[0], r[1])):
+    print("STREAM\t%d\t%d\t%s\t%s" % (height, bitrate, codec, link))
+PYEOF
+)" || return 1
+
+    [[ -n "$out" ]] || return 1
+
+    local kind a b c d
+    while IFS=$'\t' read -r kind a b c d; do
+        case "$kind" in
+            TITLE)    XHS_TITLE="$a" ;;
+            UPLOADER) XHS_UPLOADER="$a" ;;
+            DURATION) XHS_DURATION_MS="${a:-0}" ;;
+            STREAM)   [[ -n "$d" ]] && XHS_STREAMS+=("$a|$b|$c|$d") ;;
+        esac
+    done <<< "$out"
+
+    ((${#XHS_STREAMS[@]} > 0)) || return 1
+    return 0
+}
+
+xhs_pick_stream() {
+    # $1 = lựa chọn chất lượng 1-8; trả về height|bitrate|codec|url
+    # Ưu tiên h264 khi cùng độ phân giải (dễ phát trên mọi máy).
+    local choice="$1"
+    local target=0
+    local entry h t codec link rank
+    local best="" best_h=-1 best_t=-1 best_rank=-1
+    local fallback="" fallback_h=999999 fallback_t=-1 fallback_rank=-1
+
+    case "$choice" in
+        2) target=2160 ;;
+        3) target=1440 ;;
+        4) target=1080 ;;
+        5) target=720 ;;
+        6) target=480 ;;
+        7) target=360 ;;
+        *) target=0 ;;
+    esac
+
+    for entry in "${XHS_STREAMS[@]}"; do
+        IFS='|' read -r h t codec link <<< "$entry"
+        [[ "$h" =~ ^[0-9]+$ ]] || h=0
+        [[ "$t" =~ ^[0-9]+$ ]] || t=0
+        case "$codec" in
+            h264) rank=2 ;;
+            *)    rank=1 ;;
+        esac
+
+        if (( target == 0 )); then
+            if (( h > best_h )) || { (( h == best_h )) && { (( t > best_t )) || { (( t == best_t )) && (( rank > best_rank )); }; }; }; then
+                best="$entry"; best_h=$h; best_t=$t; best_rank=$rank
+            fi
+        else
+            if (( h <= target )); then
+                if (( h > best_h )) || { (( h == best_h )) && { (( t > best_t )) || { (( t == best_t )) && (( rank > best_rank )); }; }; }; then
+                    best="$entry"; best_h=$h; best_t=$t; best_rank=$rank
+                fi
+            fi
+            if (( h < fallback_h )) || { (( h == fallback_h )) && { (( rank > fallback_rank )) || { (( rank == fallback_rank )) && (( t > fallback_t )); }; }; }; then
+                fallback="$entry"; fallback_h=$h; fallback_t=$t; fallback_rank=$rank
+            fi
+        fi
+    done
+
+    if [[ -n "$best" ]]; then
+        echo "$best"
+    else
+        echo "$fallback"
+    fi
+}
+
+xhs_download_entry() {
+    # $1 = height|bitrate|codec|url, $2 = video|audio, $3 = audio format
+    local entry="$1" mode="$2" afmt="${3:-mp3}"
+    local h t codec link name out tmp
+    local codecarg=()
+
+    IFS='|' read -r h t codec link <<< "$entry"
+    if [[ -z "$link" ]]; then
+        handle_error "Không có URL video Xiaohongshu." "Thử lại hoặc nạp cookie (menu 10)."
+        return 1
+    fi
+
+    mkdir -p "$DOWNLOAD_DIR"
+    name="$(xhs_safe_name "${XHS_TITLE:-xiaohongshu}")"
+    log_info "Luồng video: ${h}p (${codec:-?})"
+
+    if [[ "$mode" == "audio" ]]; then
+        tmp="$DOWNLOAD_DIR/.tvdl_xhs_$$.mp4"
+        echo "Đang tải video tạm để tách audio..."
+        if ! curl -fL --progress-bar -o "$tmp" "$link"; then
+            rm -f "$tmp"
+            handle_error "Không tải được video Xiaohongshu." "URL CDN có thể đã hết hạn; thử lại sau."
+            return 1
+        fi
+        case "$afmt" in
+            m4a)  codecarg=(-c:a aac -b:a 192k) ;;
+            opus) codecarg=(-c:a libopus -b:a 128k) ;;
+            *)    codecarg=(-c:a libmp3lame -q:a 2) ;;
+        esac
+        out="$(xhs_unique_path "$DOWNLOAD_DIR/$name.$afmt")"
+        echo "Đang tách audio..."
+        if ffmpeg -y -loglevel error -i "$tmp" -vn "${codecarg[@]}" "$out"; then
+            rm -f "$tmp"
+            log_ok "Đã tải audio: $(basename "$out") ($(du -h "$out" 2>/dev/null | cut -f1))"
+            log_history "Xiaohongshu" "${CURRENT_URL:-$link}" "$(basename "$out")" "$(du -h "$out" 2>/dev/null | cut -f1)" "OK"
+            return 0
+        fi
+        rm -f "$tmp"
+        handle_error "Không tách được audio." "Kiểm tra ffmpeg (pkg install ffmpeg)."
+        return 1
+    fi
+
+    out="$(xhs_unique_path "$DOWNLOAD_DIR/$name.mp4")"
+    echo "Đang tải..."
+    if curl -fL --progress-bar -o "$out" "$link"; then
+        log_ok "Đã tải: $(basename "$out") ($(du -h "$out" 2>/dev/null | cut -f1))"
+        log_history "Xiaohongshu" "${CURRENT_URL:-$link}" "$(basename "$out")" "$(du -h "$out" 2>/dev/null | cut -f1)" "OK"
+        return 0
+    fi
+    rm -f "$out"
+    handle_error "Không tải được video Xiaohongshu." "URL CDN có thể đã hết hạn; thử lại hoặc cập nhật TVDL."
+    return 1
+}
+
 
 show_formats() {
     echo "Chọn chất lượng:"
@@ -1218,11 +1622,7 @@ download_video() {
     echo "Nhập URL Facebook, YouTube, Instagram, X (Twitter) hoặc Xiaohongshu:"
     read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
-
-    if ! have_ytdlp; then
-        handle_error "Không tìm thấy yt-dlp." "Cài đặt bằng: python -m pip install -U yt-dlp"
-        return
-    fi
+    url="$(resolve_share_url "$url")"
 
     local platform
     platform="$(detect_platform "$url")"
@@ -1233,7 +1633,26 @@ download_video() {
         log_warn "URL không thuộc YouTube, Facebook, Instagram, X hoặc Xiaohongshu. yt-dlp sẽ vẫn thử tải."
     fi
 
-    get_video_info "$url" || return 0
+    local is_xhs=0
+    if [[ "$platform" == "Xiaohongshu" ]] && xhs_probe "$url"; then
+        is_xhs=1
+        TITLE="$XHS_TITLE"
+        UPLOADER="$XHS_UPLOADER"
+        DURATION="$(format_ms_duration "$XHS_DURATION_MS")"
+        RESOLUTION="$(xhs_best_height)p"
+        echo ""
+        echo "Tiêu đề:      $TITLE"
+        echo "Uploader:     ${UPLOADER:-Không rõ}"
+        echo "Thời lượng:   $DURATION"
+        echo "Độ phân giải: $RESOLUTION"
+        echo ""
+    else
+        if ! have_ytdlp; then
+            handle_error "Không tìm thấy yt-dlp." "Cài đặt bằng: python -m pip install -U yt-dlp"
+            return
+        fi
+        get_video_info "$url" || return 0
+    fi
 
     echo ""
     show_formats
@@ -1241,6 +1660,39 @@ download_video() {
     qchoice="$(ask_quality "Chọn")"
     local fmt
     fmt="$(quality_to_format_string "$qchoice")"
+
+    if [[ "$is_xhs" == "1" ]]; then
+        CURRENT_URL="$url"
+        local selected
+        selected="$(xhs_pick_stream "$qchoice")"
+        if [[ -z "$selected" ]]; then
+            handle_error "Không tìm thấy luồng video Xiaohongshu." "Trang có thể yêu cầu đăng nhập (menu 10)."
+            return 0
+        fi
+        echo ""
+        echo "Tiêu đề:      $TITLE"
+        echo "Nền tảng:     Xiaohongshu"
+        echo "Thời lượng:   $DURATION"
+        echo "Chất lượng:   ${selected%%|*}p"
+        echo "Thư mục:      $DOWNLOAD_DIR"
+        echo ""
+        if ! ask_yes_no "Bắt đầu tải?"; then
+            log_warn "Đã hủy."
+            pause_screen
+            return
+        fi
+        if [[ "$qchoice" == "8" ]]; then
+            local afmt
+            afmt="$(ask_audio_format "$AUDIO_FORMAT")"
+            AUDIO_FORMAT="$afmt"
+            save_config
+            xhs_download_entry "$selected" audio "$afmt" || true
+        else
+            xhs_download_entry "$selected" video || true
+        fi
+        pause_screen
+        return
+    fi
 
     if [[ "$fmt" == "audio-only" ]]; then
         download_audio_with_url "$url"
@@ -1334,6 +1786,7 @@ download_playlist() {
     echo "Nhập URL playlist:"
     read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
+    url="$(resolve_share_url "$url")"
 
     if ! have_ytdlp; then
         handle_error "Không tìm thấy yt-dlp."
@@ -1419,6 +1872,28 @@ download_audio() {
     echo "Nhập URL video:"
     read -rp "> " url || url=""
     [[ -z "$url" ]] && { log_warn "URL trống."; pause_screen; return; }
+    url="$(resolve_share_url "$url")"
+    if [[ "$(detect_platform "$url")" == "Xiaohongshu" ]] && xhs_probe "$url"; then
+        CURRENT_URL="$url"
+        local afmt selected
+        afmt="$(ask_audio_format "$AUDIO_FORMAT")"
+        AUDIO_FORMAT="$afmt"
+        save_config
+        echo ""
+        echo "Nền tảng:  Xiaohongshu"
+        echo "Tiêu đề:   $XHS_TITLE"
+        echo "Định dạng: $afmt"
+        echo "Thư mục:   $DOWNLOAD_DIR"
+        if ! ask_yes_no "Bắt đầu tải audio?"; then
+            log_warn "Đã hủy."
+            pause_screen
+            return
+        fi
+        selected="$(xhs_pick_stream 1)"
+        xhs_download_entry "$selected" audio "$afmt" || true
+        pause_screen
+        return
+    fi
     download_audio_with_url "$url"
 }
 
