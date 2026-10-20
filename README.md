@@ -207,7 +207,23 @@ TVDL tự nhận diện nội dung cookie ở **3 dạng**:
 - **JSON** (`.json`) — Chrome, EditThisCookie, Firefox, Playwright… (kể cả phần rác/dòng thừa sau khối JSON).
 - **Chuỗi `Cookie:`** — `Cookie: a=b; c=d` hoặc `a=b; c=d`; TVDL sẽ hỏi tên miền (ví dụ `.facebook.com`) để tạo file đúng.
 
-Có thể nạp bằng file (mục 1) hoặc **dán trực tiếp** (mục 2). TVDL chuẩn hóa về Netscape trước khi lưu, hiển thị số cookie đã nhận, và **chỉ thay cookie cũ khi nội dung mới hợp lệ** — dán sai không làm mất cookie đang dùng. Bản gốc được giữ tại `~/.termux-video-downloader/cookies.txt.bak` (quyền `600`).
+Có thể nạp bằng file (mục 1) hoặc **dán trực tiếp** (mục 2). TVDL chuẩn hóa về Netscape trước khi lưu và **chỉ thay cookie cũ khi nội dung mới hợp lệ** — dán sai không làm mất cookie đang dùng. Cookie cũ được sao lưu tại `~/.termux-video-downloader/cookies.txt.bak` (quyền `600`).
+
+Sau khi lưu, TVDL hiển thị bảng xác nhận rõ ràng ngay trên màn hình:
+
+```
+────────────────────────────────────────────
+   ✓ ĐÃ LƯU COOKIE THÀNH CÔNG
+────────────────────────────────────────────
+  Số cookie:  12
+  Định dạng:  JSON → Netscape
+  File:       ~/.termux-video-downloader/cookies.txt
+  Sao lưu:    ~/.termux-video-downloader/cookies.txt.bak
+
+  Cookie này được dùng cho mọi lượt tải tiếp theo.
+```
+
+Menu 10 cũng luôn hiển thị số cookie hiện có ở đầu màn hình (ví dụ `Đã nạp (12 cookie · …)`).
 
 Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `600`, chỉ chủ tài khoản đọc được) và tự động dùng cho mọi lượt tải sau đó. **Không chia sẻ file này cho ai** — nó chứa phiên đăng nhập tài khoản của bạn.
 
@@ -235,6 +251,10 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
 
 ## 9. Lịch sử phiên bản
 
+- **v1.3.3**
+  - Hiển thị bảng **xác nhận đã lưu cookie** (số cookie, định dạng nhận được, đường dẫn, bản sao lưu) sau khi nạp/dán.
+  - Thêm dòng `Đang kiểm tra cookie...` để biết TVDL đang xử lý.
+  - Tự sao lưu cookie cũ sang `cookies.txt.bak` trước khi thay bằng cookie mới.
 - **v1.3.2**
   - **Dán cookie trực tiếp** (menu 10 → 2): tự nhận Netscape, JSON hoặc chuỗi `Cookie:`; hỏi tên miền khi cần.
   - Chỉ thay cookie khi nội dung hợp lệ — dán sai/file lỗi **không còn xóa mất cookie cũ**.
