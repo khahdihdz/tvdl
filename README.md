@@ -6,16 +6,25 @@ Engine tải: [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) + `ffmpeg` (để gh�
 
 Tác giả: **Khahdihdz** · [khahdihdz.github.io](https://khahdihdz.github.io)
 
+🌐 **Trang giới thiệu:** <https://khahdihdz.github.io/tvdl/> — tự động cập nhật sau mỗi commit trên nhánh `main` qua GitHub Actions.
+
 ---
 
 ## 1. Cấu trúc dự án
 
 ```
 tvdl/
-├── tvdl.sh              # Toàn bộ chương trình (chạy trực tiếp)
-├── README.md            # Tài liệu này
-└── LICENSE
+├── tvdl.sh                          # Toàn bộ chương trình (chạy trực tiếp)
+├── README.md                        # Tài liệu này
+├── LICENSE
+├── docs/
+│   └── index.html                   # Trang giới thiệu (GitHub Pages)
+└── .github/
+    └── workflows/
+        └── pages.yml                # Tự động deploy Pages mỗi commit
 ```
+
+Trang giới thiệu được triển khai bằng GitHub Actions: mỗi lần push lên `main`, workflow đọc `APP_VERSION` trong `tvdl.sh`, tạo `version.json` (phiên bản + commit + thời gian) rồi đẩy lên GitHub Pages.
 
 Khi chạy lần đầu, script tự tạo:
 
