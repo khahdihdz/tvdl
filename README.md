@@ -266,6 +266,10 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
 
 ## 9. Lịch sử phiên bản
 
+- **v1.3.5**
+  - Thiết kế lại logo/banner của menu: thẻ mở gọn gàng, màu mint–cyan đồng bộ với trang giới thiệu.
+  - Không còn lệch khung do chữ tiếng Việt có dấu (bỏ viền phải thay vì căn đệm theo byte).
+  - Tự ẩn URL khi terminal hẹp (< 62 cột) để banner luôn vừa màn hình Termux.
 - **v1.3.4**
   - Tự chuẩn hóa link chia sẻ Xiaohongshu: tách URL bài viết từ `/login?redirectPath=...`, theo redirect `xhslink.com`, bỏ tham số rác, giữ `xsec_token` / `xsec_source`.
   - Thêm bộ đọc Xiaohongshu trực tiếp từ HTML, tải được cả khi yt-dlp báo `No video formats found`.
