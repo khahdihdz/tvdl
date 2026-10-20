@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="TVDL logo" width="88" height="88">
+</p>
+
 # TVDL — Termux Video Downloader
 
 Công cụ tải video/ảnh **YouTube**, **Facebook**, **Instagram**, **X (Twitter)** và **Xiaohongshu** chạy trực tiếp trên **Termux (Android)**, không cần root, không cần server riêng, không dùng API trả phí.
