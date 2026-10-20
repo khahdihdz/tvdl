@@ -17,7 +17,7 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 APP_NAME="TVDL"
-APP_VERSION="1.3.0"
+APP_VERSION="1.3.1"
 APP_AUTHOR="Khahdihdz"
 APP_URL="https://khahdihdz.github.io"
 
@@ -151,6 +151,11 @@ handle_error() {
         echo "    (bị giới hạn độ tuổi / khu vực / nội dung nhạy cảm)."
         echo "  - Vào menu 10 (Cookies đăng nhập) để nạp cookie trình duyệt"
         echo "    rồi thử tải lại."
+    elif echo "$detail" | grep -qiE "must be netscape|netscape formatted|cookies file"; then
+        echo "  - File cookie đang ở định dạng JSON, còn yt-dlp chỉ nhận Netscape."
+        echo "  - Vào menu 10 → 1 (nạp lại file) hoặc 2 (dán nội dung):"
+        echo "    TVDL sẽ tự chuyển JSON sang Netscape và giữ bản gốc .json.bak."
+        echo "  - Hoặc menu 10 → 3 để xóa cookie rồi nạp lại từ đầu."
     elif echo "$detail" | grep -qiE "no video could be found"; then
         echo "  - X (Twitter) không hỗ trợ tải ẢNH qua yt-dlp (chỉ video/GIF),"
         echo "    kể cả với bản yt-dlp mới nhất — đây là giới hạn của yt-dlp,"
@@ -215,6 +220,11 @@ EOF
     mkdir -p "$DEFAULT_DOWNLOAD_DIR" 2>/dev/null || true
     touch "$(get_history_file)" 2>/dev/null || true
     touch "$(get_error_log_file)" 2>/dev/null || true
+
+    # Cookie JSON do người dùng nạp trước đây được tự chuyển sang Netscape
+    if [[ -f "$COOKIES_FILE" ]]; then
+        normalize_cookies_file "$COOKIES_FILE" || true
+    fi
 
     resolve_ytdlp
 }
@@ -466,13 +476,125 @@ log_error_to_file() {
 #     private, or "not available to everyone" content)
 # ---------------------------------------------------------------------------
 
+cookies_file_is_netscape() {
+    head -n 5 "$1" 2>/dev/null | grep -qE "^# (Netscape )?HTTP Cookie File"
+}
+
+cookies_json_to_netscape() {
+    # $1 = file JSON nguồn, $2 = file Netscape đích
+    python3 - "$1" "$2" <<'PYEOF'
+import json
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+raw = open(src, encoding="utf-8", errors="replace").read()
+
+decoder = json.JSONDecoder()
+start = -1
+for ch in ("{", "["):
+    pos = raw.find(ch)
+    if pos != -1 and (start == -1 or pos < start):
+        start = pos
+if start == -1:
+    sys.exit(2)
+try:
+    data, _ = decoder.raw_decode(raw[start:])
+except ValueError:
+    sys.exit(3)
+
+if isinstance(data, dict):
+    cookies = data.get("cookies") or data.get("Cookies") or []
+elif isinstance(data, list):
+    cookies = data
+else:
+    cookies = []
+if not isinstance(cookies, list) or not cookies:
+    sys.exit(4)
+
+
+def truthy(value):
+    return value is True or str(value).lower() in ("1", "true", "yes")
+
+
+def expiry_of(cookie):
+    if truthy(cookie.get("session")):
+        return 0
+    for key in ("expirationDate", "expiry", "expires", "expiration"):
+        value = cookie.get(key)
+        if value is None:
+            continue
+        try:
+            return max(0, int(float(value)))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+lines = []
+for cookie in cookies:
+    if not isinstance(cookie, dict):
+        continue
+    name = str(cookie.get("name") or "").strip()
+    domain = str(cookie.get("domain") or "").strip()
+    if not name or not domain:
+        continue
+    value = str(cookie.get("value") or "").replace("\r", "").replace("\n", "")
+    path = str(cookie.get("path") or "/").strip() or "/"
+    secure = "TRUE" if truthy(cookie.get("secure")) else "FALSE"
+    if truthy(cookie.get("hostOnly")):
+        domain = domain.lstrip(".")
+        include_sub = "FALSE"
+    else:
+        if not domain.startswith("."):
+            domain = "." + domain
+        include_sub = "TRUE"
+    lines.append("\t".join([domain, include_sub, path, secure,
+                            str(expiry_of(cookie)), name, value]))
+
+if not lines:
+    sys.exit(5)
+
+with open(dst, "w", encoding="utf-8") as fh:
+    fh.write("# Netscape HTTP Cookie File\n")
+    fh.write("# Chuyen tu dong tu JSON boi TVDL\n\n")
+    fh.write("\n".join(lines) + "\n")
+PYEOF
+}
+
+normalize_cookies_file() {
+    # Tự nhận diện và chuyển cookie JSON (Chrome/EditThisCookie/Firefox)
+    # sang Netscape để yt-dlp dùng được. Giữ bản gốc dưới .json.bak.
+    local f="$1"
+    local backup="$f.json.bak"
+    local tmp="$f.tmp.$$"
+
+    [[ -f "$f" ]] || return 1
+    cookies_file_is_netscape "$f" && return 0
+    [[ -s "$f" ]] || return 1
+
+    cp "$f" "$backup" 2>/dev/null || true
+    if cookies_json_to_netscape "$f" "$tmp" 2>/dev/null && cookies_file_is_netscape "$tmp"; then
+        if mv "$tmp" "$f" 2>/dev/null || cp "$tmp" "$f" 2>/dev/null; then
+            rm -f "$tmp"
+            chmod 600 "$f" 2>/dev/null || true
+            log_ok "Đã chuyển cookie JSON sang định dạng Netscape."
+            [[ -f "$backup" ]] && log_info "Bản JSON gốc được giữ tại: $backup"
+            return 0
+        fi
+    fi
+
+    rm -f "$tmp"
+    log_warn "Cookie không phải Netscape và cũng không phải JSON hợp lệ."
+    return 1
+}
+
 show_cookie_menu() {
     while true; do
         show_banner
         echo ""
         echo -e "  Cookie hiện tại: $([[ -f "$COOKIES_FILE" ]] && echo -e "${C_GREEN}Đã nạp${C_RESET} ($COOKIES_FILE)" || echo -e "${C_YELLOW}Chưa có${C_RESET}")"
         echo ""
-        echo "  1. Nạp cookie từ file (đường dẫn .txt định dạng Netscape)"
+        echo "  1. Nạp cookie từ file (.txt Netscape hoặc .json)"
         echo "  2. Dán nội dung cookie trực tiếp"
         echo "  3. Xóa cookie đã lưu"
         echo "  4. Hướng dẫn lấy cookie Instagram/Facebook"
@@ -480,7 +602,8 @@ show_cookie_menu() {
         read -rp "Chọn: " cchoice || return 0
         case "$cchoice" in
             1)
-                read -rp "Nhập đường dẫn file cookies.txt: " cpath || cpath=""
+                echo "Nhận file Netscape (.txt) hoặc JSON (.json) — JSON sẽ được tự chuyển."
+                read -rp "Nhập đường dẫn file cookie: " cpath || cpath=""
                 cpath="${cpath/#\~/$HOME}"
                 if [[ -z "$cpath" || ! -f "$cpath" ]]; then
                     log_fail "Không tìm thấy file: $cpath"
@@ -488,6 +611,7 @@ show_cookie_menu() {
                     mkdir -p "$STATE_DIR"
                     cp "$cpath" "$COOKIES_FILE"
                     chmod 600 "$COOKIES_FILE"
+                    normalize_cookies_file "$COOKIES_FILE" || true
                     resolve_ytdlp
                     log_ok "Đã nạp cookie vào $COOKIES_FILE"
                 fi
@@ -503,6 +627,7 @@ show_cookie_menu() {
                     echo "$line" >> "$COOKIES_FILE"
                 done
                 chmod 600 "$COOKIES_FILE"
+                normalize_cookies_file "$COOKIES_FILE" || true
                 resolve_ytdlp
                 log_ok "Đã lưu cookie vào $COOKIES_FILE"
                 pause_screen
