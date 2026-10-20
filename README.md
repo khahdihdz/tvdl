@@ -176,6 +176,7 @@ Các nền tảng thường xuyên thay đổi cơ chế, nên nếu tải lỗi
 
 | Tình huống | Cách xử lý |
 |---|---|
+| `Cookies file must be Netscape formatted, not JSON` | TVDL 1.3.1+ tự chuyển JSON sang Netscape khi nạp (menu 10). Nếu vẫn lỗi: menu 10 → 3 xóa cookie rồi nạp lại file `.json`/`.txt` |
 | `FFmpeg chưa cài` | `pkg install ffmpeg` hoặc chọn Y khi script hỏi tự cài |
 | Video/bài đăng riêng tư / yêu cầu đăng nhập (`not available to everyone`, `login required`...) | Nạp cookie tài khoản của bạn qua menu **10** rồi thử lại |
 | Facebook/Instagram giới hạn khu vực / thay đổi cơ chế | Kiểm tra lại URL, thử video khác, hoặc cập nhật yt-dlp |
@@ -199,6 +200,8 @@ Một số bài đăng Instagram/Facebook/X yêu cầu đăng nhập mới xem �
 2. **Dán nội dung cookie trực tiếp** — dán nội dung, kết thúc bằng dòng `END`.
 3. **Xóa cookie đã lưu**.
 4. **Xem hướng dẫn** lấy cookie bằng extension trình duyệt (ví dụ *Get cookies.txt LOCALLY*): đăng nhập trên trình duyệt → mở bài viết cần tải → export cookie → nạp vào TVDL.
+
+TVDL nhận **cả hai** định dạng: Netscape (`.txt`) và JSON (`.json` — Chrome/EditThisCookie/Firefox). Với JSON, TVDL tự chuyển sang Netscape ngay khi nạp hoặc ở lần khởi động kế tiếp; bản gốc được giữ tại `~/.termux-video-downloader/cookies.txt.json.bak` (quyền `600`).
 
 Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `600`, chỉ chủ tài khoản đọc được) và tự động dùng cho mọi lượt tải sau đó. **Không chia sẻ file này cho ai** — nó chứa phiên đăng nhập tài khoản của bạn.
 
@@ -226,6 +229,10 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
 
 ## 9. Lịch sử phiên bản
 
+- **v1.3.1**
+  - Tự nhận diện và chuyển cookie **JSON → Netscape** (menu 10, và tự chữa khi khởi động), giữ bản gốc `cookies.txt.json.bak`.
+  - Thêm gợi ý lỗi riêng khi cookie sai định dạng (`Cookies file must be Netscape formatted, not JSON`).
+  - Bỏ qua phần rác sau khối JSON khi người dùng dán thừa.
 - **v1.3.0**
   - Thêm **cài đặt / gỡ lệnh gõ nhanh `tvdl`** (menu 11, `--install`, `--uninstall`, `--status`), tự kiểm tra `PATH`, không ghi đè file lạ, không xóa nhầm lệnh khác.
   - Thêm **tự cập nhật TVDL** từ GitHub (`--update` / menu 11 → 4), có kiểm tra cú pháp, sao lưu bản cũ và đồng bộ lệnh đã cài.
