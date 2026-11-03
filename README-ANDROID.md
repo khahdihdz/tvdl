@@ -12,20 +12,29 @@ gradle assembleDebug
 
 APK debug: `app/build/outputs/apk/debug/app-debug.apk`.
 
-## Phát hành APK đã ký
+## Tự động phát hành APK đã ký
 
-Workflow `.github/workflows/android-release.yml` gọi reusable workflow
-`khahdihdz/apksign/.github/workflows/android-shared-signing.yml@main`.
+Workflow `.github/workflows/android-release.yml` tự chạy sau khi workflow **Android CI** hoàn tất thành công trên nhánh `main` (chỉ sự kiện push, không phát hành từ Pull Request).
 
-Repository này cần được đồng bộ đủ bốn Actions Secrets từ apksign:
+Quy trình tự động:
+
+1. Android CI kiểm tra build Debug.
+2. Nếu CI thành công, workflow Release build `assembleRelease`.
+3. Gọi reusable workflow `khahdihdz/apksign/.github/workflows/android-shared-signing.yml@main` để ký APK bằng keystore dùng chung.
+4. Tạo GitHub Release với APK đã ký và `SHA256SUMS.txt`.
+
+Phiên bản tự động có dạng `1.0.N`, trong đó `N` là số thứ tự chạy Android CI. Có thể phát hành thủ công bằng cách tạo tag `vX.Y.Z` hoặc chạy workflow trong Actions.
+
+### Secrets bắt buộc
+
+Repository `tvdl` phải có đủ bốn Actions Secrets tương ứng với keystore dùng chung từ `khahdihdz/apksign`:
 
 - `ANDROID_SIGNING_KEYSTORE_BASE64`
 - `ANDROID_SIGNING_STORE_PASSWORD`
 - `ANDROID_SIGNING_KEY_ALIAS`
 - `ANDROID_SIGNING_KEY_PASSWORD`
 
-Tạo tag `v1.0.0` để build và phát hành, hoặc chạy workflow thủ công trong Actions.
-Workflow phát hành file APK đã ký cùng `SHA256SUMS.txt`.
+Không đưa keystore hoặc mật khẩu vào mã nguồn. Nếu thiếu secrets hoặc ký thất bại, Release sẽ dừng và không xuất bản APK chưa ký.
 
 ## Phạm vi phiên bản nền tảng
 
