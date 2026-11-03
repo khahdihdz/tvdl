@@ -80,5 +80,5 @@ jobs:
         run: |
           gh release create "v$VERSION" release-assets/* RELEASE_NOTES.md \
             --title "TVDL Android v$VERSION" \
-            --verify-tag \
+            --target "$GITHUB_SHA" \
             --latest
