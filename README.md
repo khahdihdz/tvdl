@@ -300,3 +300,42 @@ Cookie được lưu tại `~/.termux-video-downloader/cookies.txt` (quyền `60
   - Sửa: `Ctrl+D` / hết stdin không còn làm thoát đột ngột giữa menu.
 - **v1.2.0** — Thêm hỗ trợ Xiaohongshu (video), cập nhật banner và gợi ý lỗi.
 - **v1.1.0** — Thêm hỗ trợ X (Twitter).
+
+
+---
+
+## 12. Ứng dụng Android độc lập (đang phát triển)
+
+TVDL có thêm ứng dụng Android native tại thư mục `app/`, độc lập với Termux:
+
+- Kotlin + Jetpack Compose.
+- Nhận liên kết từ Android Share Sheet.
+- Tải URL media trực tiếp bằng Android Download Manager.
+- APK phát hành được ký bằng workflow dùng chung từ [khahdihdz/apksign](https://github.com/khahdihdz/apksign).
+
+**Lưu ý về phạm vi:** bản Android nền tảng hiện tại mới tải được URL media trực tiếp. Các URL trang video YouTube/Facebook/Instagram/X/Xiaohongshu cần tích hợp bộ phân tích và trích xuất media riêng; không nên hiểu rằng ứng dụng Android đã có toàn bộ khả năng của script Termux.
+
+### Build APK
+
+Yêu cầu JDK 17, Android SDK 35 và Gradle 8.9:
+
+```bash
+gradle assembleDebug
+```
+
+APK debug: `app/build/outputs/apk/debug/app-debug.apk`.
+
+### Phát hành APK release có chữ ký
+
+Tạo tag theo dạng `v1.0.0` để GitHub Actions tự động build, ký APK bằng shared keystore từ `khahdihdz/apksign`, tạo GitHub Release và đính kèm checksum SHA-256.
+
+Workflow: [Android APK Release](.github/workflows/android-release.yml).
+
+Repository cần nhận đủ bốn Actions Secrets từ `khahdihdz/apksign`:
+
+- `ANDROID_SIGNING_KEYSTORE_BASE64`
+- `ANDROID_SIGNING_STORE_PASSWORD`
+- `ANDROID_SIGNING_KEY_ALIAS`
+- `ANDROID_SIGNING_KEY_PASSWORD`
+
+Tài liệu Android chi tiết: [README-ANDROID.md](README-ANDROID.md).
