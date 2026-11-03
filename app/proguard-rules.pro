@@ -1,0 +1,1 @@
+# TVDL release ProGuard rules.
