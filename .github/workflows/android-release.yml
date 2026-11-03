@@ -1,6 +1,11 @@
 name: Android APK Release
 
 on:
+  # Tự động phát hành sau khi Android CI build Debug thành công trên main.
+  workflow_run:
+    workflows: ["Android CI"]
+    branches: [main]
+    types: [completed]
   push:
     tags:
       - "v*"
@@ -13,20 +18,38 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   prepare:
+    # workflow_run chỉ được phát hành khi CI thành công; PR không bao giờ kích hoạt release.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
       version_code: ${{ steps.meta.outputs.version_code }}
+      source_sha: ${{ steps.meta.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - id: meta
         shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          CI_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
+          set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            version="${{ inputs.version }}"
+            version="$INPUT_VERSION"
+          elif [ "${GITHUB_EVENT_NAME}" = "workflow_run" ]; then
+            version="1.0.$CI_RUN_NUMBER"
           else
             version="${GITHUB_REF_NAME#v}"
           fi
@@ -36,6 +59,7 @@ jobs:
           code="$(echo "$version" | awk -F'[.-]' '{ printf "%d%02d%02d", $1, $2, $3 }')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "version_code=$code" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
 
   build-sign:
     needs: prepare
@@ -51,13 +75,18 @@ jobs:
     needs: [prepare, build-sign]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
       - uses: actions/download-artifact@v4
         with:
           name: android-signed-apks
           path: release-assets
       - name: Prepare checksums and release notes
         shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           test -n "$(find release-assets -name '*-signed.apk' -print -quit)"
@@ -65,20 +94,26 @@ jobs:
           sha256sum *-signed.apk > SHA256SUMS.txt
           cd ..
           cat > RELEASE_NOTES.md <<EOF
-          ## TVDL Android v${{ needs.prepare.outputs.version }}
+          ## TVDL Android v$VERSION
 
           - APK độc lập cho Android, không yêu cầu Termux.
           - APK đã ký bằng shared release keystore từ khahdihdz/apksign.
           - SHA-256 checksum đi kèm để xác minh tệp.
-          
+
           Xem README để biết giới hạn tính năng của phiên bản.
           EOF
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.prepare.outputs.version }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
+          set -euo pipefail
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "Release v$VERSION already exists; refusing to overwrite."
+            exit 1
+          fi
           gh release create "v$VERSION" release-assets/* RELEASE_NOTES.md \
             --title "TVDL Android v$VERSION" \
-            --target "$GITHUB_SHA" \
+            --target "$SOURCE_SHA" \
             --latest
