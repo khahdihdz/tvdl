@@ -1,0 +1,84 @@
+name: Android APK Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.0.0"
+        required: true
+        default: "1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      version_code: ${{ steps.meta.outputs.version_code }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        shell: bash
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "Invalid version: $version"; exit 1
+          fi
+          code="$(echo "$version" | awk -F'[.-]' '{ printf "%d%02d%02d", $1, $2, $3 }')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
+
+  build-sign:
+    needs: prepare
+    uses: khahdihdz/apksign/.github/workflows/android-shared-signing.yml@main
+    with:
+      project-dir: .
+      gradle-task: assembleRelease
+      version-code: ${{ needs.prepare.outputs.version_code }}
+      version-name: ${{ needs.prepare.outputs.version }}
+    secrets: inherit
+
+  publish:
+    needs: [prepare, build-sign]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-signed-apks
+          path: release-assets
+      - name: Prepare checksums and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$(find release-assets -name '*-signed.apk' -print -quit)"
+          cd release-assets
+          sha256sum *-signed.apk > SHA256SUMS.txt
+          cd ..
+          cat > RELEASE_NOTES.md <<EOF
+          ## TVDL Android v${{ needs.prepare.outputs.version }}
+
+          - APK độc lập cho Android, không yêu cầu Termux.
+          - APK đã ký bằng shared release keystore từ khahdihdz/apksign.
+          - SHA-256 checksum đi kèm để xác minh tệp.
+          
+          Xem README để biết giới hạn tính năng của phiên bản.
+          EOF
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          gh release create "v$VERSION" release-assets/* RELEASE_NOTES.md \
+            --title "TVDL Android v$VERSION" \
+            --verify-tag \
+            --latest
