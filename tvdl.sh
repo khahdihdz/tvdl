@@ -292,11 +292,11 @@ check_dependencies() {
         log_warn "Không phát hiện Termux (script vẫn có thể chạy trên Linux thường)"
     fi
 
-    if command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1; then
-        echo -e "${C_GREEN}[✓]${C_RESET} Python"
+    if command -v python3 >/dev/null 2>&1; then
+        echo -e "${C_GREEN}[✓]${C_RESET} Python 3"
     else
-        echo -e "${C_RED}[✗]${C_RESET} Python"
-        missing+=("python")
+        echo -e "${C_RED}[✗]${C_RESET} Python 3 (bắt buộc để xử lý link chia sẻ)"
+        missing+=("python3")
     fi
 
     if command -v ffmpeg >/dev/null 2>&1; then
@@ -337,9 +337,9 @@ install_dependencies() {
 
     for p in "${pkgs[@]}"; do
         case "$p" in
-            python)
+            python3)
                 if [[ -n "$pkg_manager" ]]; then
-                    "$pkg_manager" install -y python || handle_error "Không cài được python"
+                    "$pkg_manager" install -y python || handle_error "Không cài được Python 3"
                 fi
                 ;;
             ffmpeg)
@@ -462,7 +462,7 @@ resolve_share_url() {
     python3 - "$url" <<'PYEOF'
 import re
 import sys
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 raw = sys.argv[1].strip().strip('"\'')
 match = re.search(r'https?://[^\s<>"\']+', raw)
@@ -474,7 +474,7 @@ for _ in range(3):
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     if "redirectPath" not in query:
         break
-    url = unquote(query.pop("redirectPath", ""))
+    url = query.pop("redirectPath", "")
 
 parts = urlsplit(url)
 host = (parts.hostname or "").lower()
