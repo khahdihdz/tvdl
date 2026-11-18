@@ -477,13 +477,18 @@ for _ in range(3):
     url = unquote(query.pop("redirectPath", ""))
 
 parts = urlsplit(url)
-host = parts.netloc.lower()
-if not host.endswith("xiaohongshu.com"):
+host = (parts.hostname or "").lower()
+
+# RedNote is the new web domain used by Xiaohongshu share redirects.
+# yt-dlp's Xiaohongshu extractor expects the xiaohongshu.com domain,
+# so normalize both domains after unwrapping /login?redirectPath=...
+if host == "rednote.com" or host.endswith(".rednote.com"):
+    host = "www.xiaohongshu.com"
+elif host == "xiaohongshu.com" or host.endswith(".xiaohongshu.com"):
+    host = "www.xiaohongshu.com"
+else:
     print(url)
     sys.exit(0)
-
-if not host.startswith("www."):
-    host = "www." + host.lstrip(".")
 
 item = re.match(r"^/(?:explore|discovery/item)/([0-9a-fA-F]+)", parts.path)
 if not item:
